@@ -73,9 +73,9 @@ export class AiService {
           });
 
       // Run synchronously for now; queue-backed execution is TODO per detail-design §7.
-      const result = await this.pipeline.run(job.id, correlationId, { model, temperature, targetDays, promptHash });
+        const result = await this.pipeline.run(job.id, correlationId, { model, temperature, targetDays, promptHash });
 
-      return { jobId: job.id, status: result.status, itineraryId: result.itineraryId ?? job.itineraryId };
+        return { jobId: job.id, status: result.status, itineraryId: job.itineraryId };
   }
 
   async getStatus(jobId: string, userId: string) {
