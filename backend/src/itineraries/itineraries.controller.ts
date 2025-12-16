@@ -1,10 +1,12 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Request } from 'express';
+import { randomUUID } from 'crypto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { ItinerariesService } from './itineraries.service';
 import { CreateItineraryDto } from './dto/create-itinerary.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
-import { RegenerateDto } from './dto/regenerate.dto';
+import { RegenerateDto, RegenerateRequestDto } from './dto/regenerate.dto';
 
 @Controller('itineraries')
 @UseGuards(JwtAuthGuard)
@@ -50,8 +52,14 @@ export class ItinerariesController {
    */
   @Post(':id/regenerate')
   @HttpCode(HttpStatus.ACCEPTED)
-  regenerate(@Param('id') id: string, @Body() body: Omit<RegenerateDto, 'itineraryId'>, @CurrentUser() user: { id: string }) {
-    return this.itinerariesService.regenerate(id, { ...body, itineraryId: id }, user.id);
+  regenerate(
+    @Param('id') id: string,
+    @Body() body: RegenerateRequestDto,
+    @CurrentUser() user: { id: string },
+    @Req() req: Request,
+  ) {
+    const correlationId = (req as any).correlationId as string | undefined;
+    return this.itinerariesService.regenerate(id, { ...body, itineraryId: id }, user.id, correlationId ?? randomUUID());
   }
 
   /**
