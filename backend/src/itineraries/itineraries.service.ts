@@ -136,7 +136,7 @@ export class ItinerariesService {
         prompt: 'regenerate requested',
         request: { itineraryId: id, targetDays: dto.days },
         rawResponse: 'TODO: enqueue to AI pipeline',
-        parsed: null,
+        parsed: Prisma.JsonNull,
         status: GenerationJobStatus.QUEUED,
         retryCount: 0,
         model,
