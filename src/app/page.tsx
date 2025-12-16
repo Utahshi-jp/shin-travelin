@@ -2,14 +2,16 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Controller, FormProvider, useFieldArray, useForm } from "react-hook-form";
+import { useMemo, useState } from "react";
+import { FormProvider, useFieldArray, useForm } from "react-hook-form";
 import { api, ApiError } from "@/shared/api/client";
 import { draftFormSchema, DraftFormValues } from "@/shared/validation/draft.schema";
+import { scrollToFirstError } from "@/shared/validation/scrollToFirstError";
+import { useToast } from "@/shared/ui/ToastProvider";
 
 export default function Home() {
   const router = useRouter();
-  const [toast, setToast] = useState<string | null>(null);
+  const { push } = useToast();
   const [authMessage, setAuthMessage] = useState<string | null>(null);
 
   const form = useForm<DraftFormValues>({
@@ -29,44 +31,37 @@ export default function Home() {
 
   const destArray = useFieldArray({ control: form.control, name: "destinations" });
   const purposesArray = useFieldArray({ control: form.control, name: "purposes" });
-  const firstErrorRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    if (form.formState.isSubmitted && Object.keys(form.formState.errors).length > 0) {
-      const first = document.querySelector("[data-first-error=true]") as HTMLElement | null;
-      first?.scrollIntoView({ behavior: "smooth", block: "center" });
-      first?.focus();
-    }
-  }, [form.formState.errors, form.formState.isSubmitted]);
 
   const onSubmit = form.handleSubmit(async (values) => {
-    setToast(null);
+    // Why: サーバに行く前にクライアント側でバリデーション済みでも、APIエラーを統一的に扱う。
     try {
       const draft = await api.createDraft(values);
       const job = await api.startGeneration({ draftId: draft.id });
       router.push(`/itineraries/${draft.id}?jobId=${job.jobId}`);
     } catch (err) {
       if (err instanceof ApiError) {
-        setToast(`${err.code}: ${err.message}` + (err.correlationId ? ` (${err.correlationId})` : ""));
+        push({ message: `${err.code}: ${err.message}`, variant: "error", correlationId: err.correlationId });
       } else {
-        setToast("予期せぬエラーが発生しました");
+        push({ message: "予期せぬエラーが発生しました", variant: "error" });
       }
     }
   }, () => {
-    const firstName = Object.keys(form.formState.errors)[0];
-    if (firstName) {
-      firstErrorRef.current = document.querySelector(`[name="${firstName}"]`);
-    }
+    scrollToFirstError(form.formState.errors);
   });
 
   const disableAddDestination = useMemo(() => destArray.fields.length >= 5, [destArray.fields.length]);
   const disableAddPurpose = useMemo(() => purposesArray.fields.length >= 5, [purposesArray.fields.length]);
 
+  const persistToken = (token: string) => {
+    // Why: CSRではlocalStorage、SSR一覧ではCookie経由で再利用するため両経路に保存。
+    localStorage.setItem("shin_access_token", token);
+    document.cookie = `shin_access_token=${token}; path=/; SameSite=Lax`;
+  };
+
   const handleLogin = async (email: string, password: string) => {
     try {
       const res = await api.login({ email, password });
-      localStorage.setItem("shin_access_token", res.accessToken);
-      document.cookie = `shin_access_token=${res.accessToken}; path=/; SameSite=Lax`;
+      persistToken(res.accessToken);
       setAuthMessage("ログインしました");
     } catch (err) {
       setAuthMessage(err instanceof ApiError ? err.message : "ログインに失敗しました");
@@ -76,8 +71,7 @@ export default function Home() {
   const handleRegister = async (email: string, password: string, displayName: string) => {
     try {
       const res = await api.register({ email, password, displayName });
-      localStorage.setItem("shin_access_token", res.accessToken);
-      document.cookie = `shin_access_token=${res.accessToken}; path=/; SameSite=Lax`;
+      persistToken(res.accessToken);
       setAuthMessage("登録しました");
     } catch (err) {
       setAuthMessage(err instanceof ApiError ? err.message : "登録に失敗しました");
@@ -91,17 +85,16 @@ export default function Home() {
 
       <AuthBox onLogin={handleLogin} onRegister={handleRegister} message={authMessage} />
 
-      {toast && <div role="alert" className="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm">{toast}</div>}
-
       <FormProvider {...form}>
         <form className="mt-6 grid gap-4" onSubmit={onSubmit}>
           <Field label="出発地" name="origin" ariaDescribedBy="originHelp" error={form.formState.errors.origin?.message}>
             <input
               {...form.register("origin")}
-              data-first-error={!!form.formState.errors.origin}
+              data-error-for="origin"
               id="origin"
               className="w-full rounded border px-3 py-2"
               aria-describedby="originHelp"
+              aria-invalid={!!form.formState.errors.origin}
             />
           </Field>
           <p id="originHelp" className="text-xs text-slate-500">3-200文字</p>
@@ -124,7 +117,8 @@ export default function Home() {
                   <input
                     {...form.register(`destinations.${index}` as const)}
                     className="w-full rounded border px-3 py-2"
-                    data-first-error={!!form.formState.errors.destinations?.[index]}
+                    data-error-for={`destinations.${index}`}
+                    aria-invalid={!!form.formState.errors.destinations?.[index]}
                   />
                   <button type="button" aria-label="削除" onClick={() => destArray.remove(index)} className="rounded border px-2 py-1">
                     削除
@@ -136,14 +130,22 @@ export default function Home() {
 
           <div className="grid grid-cols-2 gap-4">
             <Field label="開始日" name="startDate" error={form.formState.errors.startDate?.message}>
-              <input type="date" {...form.register("startDate")}
-                data-first-error={!!form.formState.errors.startDate}
-                className="w-full rounded border px-3 py-2" />
+              <input
+                type="date"
+                {...form.register("startDate")}
+                data-error-for="startDate"
+                aria-invalid={!!form.formState.errors.startDate}
+                className="w-full rounded border px-3 py-2"
+              />
             </Field>
             <Field label="終了日" name="endDate" error={form.formState.errors.endDate?.message}>
-              <input type="date" {...form.register("endDate")}
-                data-first-error={!!form.formState.errors.endDate}
-                className="w-full rounded border px-3 py-2" />
+              <input
+                type="date"
+                {...form.register("endDate")}
+                data-error-for="endDate"
+                aria-invalid={!!form.formState.errors.endDate}
+                className="w-full rounded border px-3 py-2"
+              />
             </Field>
           </div>
 
@@ -153,7 +155,8 @@ export default function Home() {
               min={5000}
               max={5000000}
               {...form.register("budget", { valueAsNumber: true })}
-              data-first-error={!!form.formState.errors.budget}
+              data-error-for="budget"
+              aria-invalid={!!form.formState.errors.budget}
               className="w-full rounded border px-3 py-2"
             />
           </Field>
@@ -176,7 +179,8 @@ export default function Home() {
                   <input
                     {...form.register(`purposes.${index}` as const)}
                     className="w-full rounded border px-3 py-2"
-                    data-first-error={!!form.formState.errors.purposes?.[index]}
+                    data-error-for={`purposes.${index}`}
+                    aria-invalid={!!form.formState.errors.purposes?.[index]}
                   />
                   <button type="button" aria-label="削除" onClick={() => purposesArray.remove(index)} className="rounded border px-2 py-1">
                     削除
@@ -202,17 +206,24 @@ export default function Home() {
                 ["pet", "ペット"],
                 ["other", "その他"],
               ] as const
-            ).map(([key, label]) => (
-              <Field key={key} label={label} name={`companions.${key}`} error={(form.formState.errors.companions as any)?.[key]?.message}>
-                <input
-                  type="number"
-                  min={0}
-                  max={20}
-                  {...form.register(`companions.${key}` as const, { valueAsNumber: true })}
-                  className="w-full rounded border px-3 py-2"
-                />
-              </Field>
-            ))}
+            ).map(([key, label]) => {
+              type CompanionKey = keyof DraftFormValues["companions"];
+              const companionErrors = form.formState.errors.companions as Partial<Record<CompanionKey, { message?: string }>> | undefined;
+              const errorMessage = companionErrors?.[key]?.message;
+
+              return (
+                <Field key={key} label={label} name={`companions.${key}`} error={errorMessage}>
+                  <input
+                    type="number"
+                    min={0}
+                    max={20}
+                    {...form.register(`companions.${key}` as const, { valueAsNumber: true })}
+                    className="w-full rounded border px-3 py-2"
+                    aria-invalid={!!companionErrors?.[key]}
+                  />
+                </Field>
+              );
+            })}
           </fieldset>
 
           <button
