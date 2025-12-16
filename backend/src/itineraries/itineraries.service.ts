@@ -1,5 +1,6 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { GenerationJobStatus, Prisma, Weather } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ErrorCode } from '../shared/error-codes';
 import { AiService } from '../ai/ai.service';
@@ -19,7 +20,13 @@ export class ItinerariesService {
     if (!job) throw new NotFoundException({ code: ErrorCode.NOT_FOUND, message: 'Job not found' });
     if (job.draft.userId !== userId) throw new ForbiddenException({ code: ErrorCode.FORBIDDEN, message: 'Forbidden' });
     if (job.status !== GenerationJobStatus.SUCCEEDED) {
-      throw new ConflictException({ code: ErrorCode.JOB_ALREADY_RUNNING, message: 'Job not finished' });
+      throw new ConflictException({ code: ErrorCode.JOB_CONFLICT, message: 'Job not finished' });
+    }
+    if (job.itineraryId) {
+      throw new ConflictException({ code: ErrorCode.VERSION_CONFLICT, message: 'Itinerary already exists for this job' });
+    }
+    if (job.draftId !== dto.draftId) {
+      throw new ConflictException({ code: ErrorCode.VERSION_CONFLICT, message: 'Draft mismatch for job' });
     }
 
     const itinerary = await this.prisma.$transaction(async (tx) => {
@@ -27,7 +34,6 @@ export class ItinerariesService {
         data: {
           userId,
           draftId: dto.draftId,
-          generationJobId: dto.jobId,
           title: dto.title,
         },
       });
@@ -63,10 +69,10 @@ export class ItinerariesService {
         },
       });
 
+      await tx.generationJob.update({ where: { id: dto.jobId }, data: { itineraryId: created.id } });
+
       return created;
     });
-
-    await this.prisma.generationJob.update({ where: { id: dto.jobId }, data: { itineraryId: itinerary.id } });
     return { id: itinerary.id, version: itinerary.version };
   }
 
@@ -100,35 +106,12 @@ export class ItinerariesService {
     }
 
     const nextVersion = itinerary.version + 1;
-    await this.prisma.$transaction(async (tx) => {
-      await tx.itinerary.update({ where: { id }, data: { title: dto.title ?? itinerary.title, version: nextVersion } });
-
-      if (dto.days) {
-        const dayIds = (await tx.itineraryDay.findMany({ where: { itineraryId: id }, select: { id: true } })).map((d) => d.id);
-        await tx.activity.deleteMany({ where: { itineraryDayId: { in: dayIds } } });
-        await tx.itineraryDay.deleteMany({ where: { itineraryId: id } });
-
-        for (const [dayIndex, day] of dto.days.entries()) {
-          const dayRow = await tx.itineraryDay.create({ data: { itineraryId: id, dayIndex, date: new Date(day.date) } });
-          await tx.activity.createMany({
-            data: day.activities.map((activity) => ({
-              itineraryDayId: dayRow.id,
-              time: activity.time,
-              location: activity.location,
-              content: activity.content,
-              url: activity.url,
-              weather: (activity.weather ?? 'UNKNOWN') as Weather,
-              orderIndex: activity.orderIndex,
-            })),
-          });
-        }
-      }
-    });
+    await this.prisma.itinerary.update({ where: { id }, data: { title: dto.title ?? itinerary.title, version: nextVersion } });
 
     return { version: nextVersion };
   }
 
-  async regenerate(id: string, dto: RegenerateDto, userId: string) {
+  async regenerate(id: string, dto: RegenerateDto, userId: string, correlationId: string) {
     const itinerary = await this.prisma.itinerary.findUnique({ where: { id }, include: { draft: true } });
     if (!itinerary) throw new NotFoundException({ code: ErrorCode.NOT_FOUND, message: 'Itinerary not found' });
     if (itinerary.userId !== userId) throw new ForbiddenException({ code: ErrorCode.FORBIDDEN, message: 'Forbidden' });
@@ -136,10 +119,31 @@ export class ItinerariesService {
     const running = await this.prisma.generationJob.findFirst({
       where: { itineraryId: id, status: { in: [GenerationJobStatus.QUEUED, GenerationJobStatus.RUNNING] } },
     });
-    if (running) throw new ConflictException({ code: ErrorCode.JOB_ALREADY_RUNNING, message: 'Regeneration already running' });
+    if (running) throw new ConflictException({ code: ErrorCode.JOB_CONFLICT, message: 'Regeneration already running' });
 
-    const { jobId } = await this.aiService.enqueue({ draftId: itinerary.draftId, targetDays: dto.days }, userId);
+    const { jobId } = await this.aiService.enqueue({ draftId: itinerary.draftId, targetDays: dto.days }, userId, correlationId);
     await this.prisma.generationJob.update({ where: { id: jobId }, data: { itineraryId: id } });
+
+    const model = process.env.AI_MODEL ?? 'gemini-pro';
+    const envTemp = process.env.AI_TEMPERATURE ? parseFloat(process.env.AI_TEMPERATURE) : 0.3;
+    const temperature = Number.isFinite(envTemp) ? envTemp : 0.3;
+
+    await this.prisma.aiGenerationAudit.create({
+      data: {
+        id: randomUUID(),
+        jobId,
+        correlationId,
+        prompt: 'regenerate requested',
+        request: { itineraryId: id, targetDays: dto.days },
+        rawResponse: 'TODO: enqueue to AI pipeline',
+        parsed: null,
+        status: GenerationJobStatus.QUEUED,
+        retryCount: 0,
+        model,
+        temperature,
+      },
+    });
+
     return { jobId };
   }
 

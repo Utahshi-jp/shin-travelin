@@ -3,6 +3,13 @@ import { GenerationJobStatus, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 
+type RunOptions = {
+  model: string;
+  temperature: number;
+  targetDays: number[];
+  promptHash: string;
+};
+
 /**
  * Centralized AI pipeline placeholder; Gemini integration is TODO to keep scope manageable while retaining audit hooks.
  */
@@ -12,42 +19,86 @@ export class AiPipeline {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async run(jobId: string, correlationId: string) {
-    // Mark running before performing LLM call.
-    await this.prisma.generationJob.update({ where: { id: jobId }, data: { status: GenerationJobStatus.RUNNING, startedAt: new Date() } });
+  async run(jobId: string, correlationId: string, options: RunOptions) {
+    // Mark running before performing LLM call; this ensures status is accurate even if downstream fails.
+    await this.prisma.generationJob.update({
+      where: { id: jobId },
+      data: {
+        status: GenerationJobStatus.RUNNING,
+        startedAt: new Date(),
+        model: options.model,
+        temperature: options.temperature,
+        targetDays: options.targetDays,
+        promptHash: options.promptHash,
+      },
+    });
 
-    // TODO: Implement Gemini call, stripCodeFence, JSON.parse, Zod validation, and repair retries (detail-design.md 5.1/12.3).
-    // For now, mark as succeeded with empty partialDays so downstream flows can be wired.
-    const parsed = { days: [], title: 'Pending generated title' } as Prisma.JsonObject;
-    await this.prisma.$transaction([
-      this.prisma.aiGenerationAudit.create({
-        data: {
-          id: randomUUID(),
-          jobId,
-          correlationId,
-          prompt: 'TODO: promptBuilder output',
-          request: {},
-          rawResponse: 'TODO: Gemini response',
-          parsed,
-          status: GenerationJobStatus.SUCCEEDED,
-          retryCount: 0,
-          model: process.env.AI_MODEL ?? 'gemini-pro',
-          temperature: process.env.AI_TEMPERATURE ? parseFloat(process.env.AI_TEMPERATURE) : 0.3,
-        },
-      }),
-      this.prisma.generationJob.update({
-        where: { id: jobId },
-        data: {
-          status: GenerationJobStatus.SUCCEEDED,
-          partialDays: [],
-          retryCount: 0,
-          finishedAt: new Date(),
-          error: null,
-        },
-      }),
-    ]);
+    try {
+      // TODO: Implement Gemini call, stripCodeFence, JSON.parse, Zod validation, and repair retries (detail-design.md 5.1/12.3).
+      // For now, mark as succeeded with empty partialDays so downstream flows can be wired.
+      const parsed = { days: [], title: 'Pending generated title' } as Prisma.JsonObject;
 
-    this.logger.log({ jobId, correlationId, status: GenerationJobStatus.SUCCEEDED });
-    return { parsed, partialDays: [] };
+      await this.prisma.$transaction([
+        this.prisma.aiGenerationAudit.create({
+          data: {
+            id: randomUUID(),
+            jobId,
+            correlationId,
+            prompt: 'TODO: promptBuilder output',
+            request: {},
+            rawResponse: 'TODO: Gemini response',
+            parsed,
+            status: GenerationJobStatus.SUCCEEDED,
+            retryCount: 0,
+            model: options.model,
+            temperature: options.temperature,
+          },
+        }),
+        this.prisma.generationJob.update({
+          where: { id: jobId },
+          data: {
+            status: GenerationJobStatus.SUCCEEDED,
+            partialDays: [],
+            retryCount: 0,
+            finishedAt: new Date(),
+            error: null,
+          },
+        }),
+      ]);
+
+      this.logger.log({ jobId, correlationId, status: GenerationJobStatus.SUCCEEDED });
+      return { status: GenerationJobStatus.SUCCEEDED, parsed, partialDays: [] };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      await this.prisma.$transaction([
+        this.prisma.aiGenerationAudit.create({
+          data: {
+            id: randomUUID(),
+            jobId,
+            correlationId,
+            prompt: 'TODO: promptBuilder output',
+            request: {},
+            rawResponse: 'TODO: Gemini response',
+            parsed: null,
+            status: GenerationJobStatus.FAILED,
+            retryCount: 0,
+            model: options.model,
+            temperature: options.temperature,
+            errorMessage: message,
+          },
+        }),
+        this.prisma.generationJob.update({
+          where: { id: jobId },
+          data: {
+            status: GenerationJobStatus.FAILED,
+            error: message,
+            finishedAt: new Date(),
+          },
+        }),
+      ]);
+
+      this.logger.error({ jobId, correlationId, error: message });
+      return { status: GenerationJobStatus.FAILED, error: message };
+    }
   }
 }

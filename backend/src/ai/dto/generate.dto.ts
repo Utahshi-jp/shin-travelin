@@ -1,4 +1,4 @@
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsOptional, IsString, IsUUID } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsInt, IsOptional, IsUUID, Min } from 'class-validator';
 
 /**
  * AI generation request; targetDays limits regeneration scope (AI-3).
@@ -11,5 +11,7 @@ export class GenerateDto {
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(31)
+  @IsInt({ each: true })
+  @Min(0, { each: true })
   targetDays?: number[];
 }

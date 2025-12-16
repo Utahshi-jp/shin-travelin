@@ -1,4 +1,4 @@
-import { ValidationPipe } from '@nestjs/common';
+import { HttpStatus, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { json } from 'express';
 import { AppModule } from './app.module';
@@ -18,6 +18,8 @@ async function bootstrap() {
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
+      // Validation errors should surface as 422 to separate from semantic 400 checks (design docs §7.1).
+      errorHttpStatusCode: HttpStatus.UNPROCESSABLE_ENTITY,
     }),
   );
   app.useGlobalFilters(new HttpExceptionFilter());

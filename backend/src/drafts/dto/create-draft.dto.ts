@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsDateString, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsDateString, IsDefined, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 
 class CompanionsDto {
   @IsInt()
@@ -76,6 +76,8 @@ export class CreateDraftDto {
   @MaxLength(500)
   memo?: string;
 
+  @ValidateNested()
   @Type(() => CompanionsDto)
+  @IsDefined()
   companions!: CompanionsDto;
 }

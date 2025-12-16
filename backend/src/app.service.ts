@@ -6,7 +6,13 @@ export class AppService {
   constructor(private readonly prisma: PrismaService) {}
 
   async health() {
-    const tripCount = await this.prisma.trip.count();
-    return { status: 'ok', tripCount };
+    // Keep health endpoint lightweight; a simple DB ping avoids scanning large tables.
+    try {
+      await this.prisma.$queryRaw`SELECT 1`;
+      return { status: 'ok' };
+    } catch (_err) {
+      // Degrade gracefully so uptime checks do not explode the app.
+      return { status: 'degraded' };
+    }
   }
 }
