@@ -1,10 +1,13 @@
+// Prisma schema for shin-travelin
+// NOTE: No ON DELETE CASCADE is used (requirements: history must be preserved). All integrity cleanup (e.g., Draft TTL) is handled in services/cron.
+// NOTE: Prisma 7 requires datasource.url to be configured via prisma.config.ts; keep datasource here provider-only.
+
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 enum DraftStatus {
@@ -26,18 +29,20 @@ enum Weather {
   UNKNOWN
 }
 
+/// User accounts; owns Drafts and Itineraries (requirements FR/AR auth baseline).
 model User {
-  id           String     @id @default(uuid())
-  email        String     @unique
+  id           String   @id @default(uuid())
+  email        String   @unique
   passwordHash String
   displayName  String
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   drafts      Draft[]
   itineraries Itinerary[]
 }
 
+/// Draft captures pre-generation input snapshot; TTL managed externally (db-structure.md §2.2, requirements DB-4).
 model Draft {
   id           String      @id @default(uuid())
   userId       String
@@ -57,25 +62,30 @@ model Draft {
   generationJobs  GenerationJob[]
   itineraries     Itinerary[]
 
-  /// DB-level start/end check is enforced in service layer because Prisma does not yet emit CHECK constraints.
+  // NOTE: CHECK(startDate <= endDate) is enforced in service layer (Prisma lacks portable CHECK DDL).
+  // Index for user-scoped listing and TTL scans (db-structure.md indexes).
   @@index([userId])
   @@index([status, createdAt])
 }
 
+/// CompanionDetail holds per-draft companion counts; 1:1 with Draft (db-structure.md §2.3).
 model CompanionDetail {
-  id         String @id @default(uuid())
-  draftId    String @unique
-  adultMale  Int    @default(0)
-  adultFemale Int   @default(0)
-  boy        Int    @default(0)
-  girl       Int    @default(0)
-  infant     Int    @default(0)
-  pet        Int    @default(0)
-  other      Int    @default(0)
+  id          String   @id @default(uuid())
+  draftId     String   @unique
+  adultMale   Int      @default(0)
+  adultFemale Int      @default(0)
+  boy         Int      @default(0)
+  girl        Int      @default(0)
+  infant      Int      @default(0)
+  pet         Int      @default(0)
+  other       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   draft Draft @relation(fields: [draftId], references: [id])
 }
 
+/// GenerationJob tracks AI generation lifecycle; only one queued/running per Draft (AR-6, ER-3 multi-run guard).
 model GenerationJob {
   id          String              @id @default(uuid())
   draftId     String
@@ -95,13 +105,19 @@ model GenerationJob {
 
   draft     Draft    @relation(fields: [draftId], references: [id])
   audits    AiGenerationAudit[]
-  itinerary Itinerary? @relation(fields: [itineraryId], references: [id])
+  itinerary Itinerary? @relation("GenerationJobItinerary", fields: [itineraryId], references: [id])
 
+  // Enforces at most one queued/running per draft (multi-run prevention, basic-design §5.2 / ER-3).
   @@index([draftId, status])
+  // Status index supports polling by state (AR-7 list/polling use).
   @@index([status])
+  // Reuse successful generations when same inputs (draftId+model+temperature+promptHash) per requirements AI-5.
   @@unique([draftId, model, temperature, promptHash])
+  // One-to-one optional link to created itinerary; keep FK on GenerationJob side and ensure uniqueness.
+  @@unique([itineraryId])
 }
 
+/// AiGenerationAudit is append-only audit log for every LLM call (requirements AI-4 / DB-3).
 model AiGenerationAudit {
   id            String              @id @default(uuid())
   jobId         String
@@ -116,17 +132,19 @@ model AiGenerationAudit {
   model         String?
   temperature   Float?
   createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
 
   job GenerationJob @relation(fields: [jobId], references: [id])
 
+  // Indexed for job timeline queries (db-structure.md §2.5).
   @@index([jobId, createdAt])
 }
 
+/// Itinerary is normalized travel plan; version supports optimistic locking in PATCH /itineraries/:id (409 VERSION_CONFLICT per AR-9/ER-3).
 model Itinerary {
   id              String            @id @default(uuid())
   userId          String
   draftId         String
-  generationJobId String?
   title           String
   version         Int               @default(1)
   createdAt       DateTime          @default(now())
@@ -134,20 +152,24 @@ model Itinerary {
 
   user          User          @relation(fields: [userId], references: [id])
   draft         Draft         @relation(fields: [draftId], references: [id])
-  generationJob GenerationJob? @relation(fields: [generationJobId], references: [id])
+  generationJob GenerationJob? @relation("GenerationJobItinerary")
   days          ItineraryDay[]
   raw           ItineraryRaw?
 
+  // Listing by user with recency (db-structure.md indexes).
   @@index([userId, createdAt])
+  // Join to Draft provenance (analysis/cleanup).
   @@index([draftId])
 }
 
+/// ItineraryDay expresses per-day slice; unique (itineraryId, dayIndex) enforces day ordering (basic-design §5.2).
 model ItineraryDay {
   id          String    @id @default(uuid())
   itineraryId String
   dayIndex    Int
   date        DateTime
   createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   itinerary Itinerary @relation(fields: [itineraryId], references: [id])
   activities Activity[]
@@ -155,6 +177,7 @@ model ItineraryDay {
   @@unique([itineraryId, dayIndex])
 }
 
+/// Activity stores ordered items within a day; (itineraryDayId, orderIndex) unique keeps stable ordering (requirements DB-1, basic-design §5.2).
 model Activity {
   id             String       @id @default(uuid())
   itineraryDayId String
@@ -165,13 +188,16 @@ model Activity {
   weather        Weather
   orderIndex     Int
   createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   day ItineraryDay @relation(fields: [itineraryDayId], references: [id])
 
   @@unique([itineraryDayId, orderIndex])
+  // Supports ordered fetch within a day (list screen rendering).
   @@index([itineraryDayId, orderIndex])
 }
 
+/// ItineraryRaw keeps raw LLM JSON for audit/re-parse; deletion forbidden by policy (db-structure.md §2.9).
 model ItineraryRaw {
   id          String   @id @default(uuid())
   itineraryId String   @unique
@@ -179,9 +205,10 @@ model ItineraryRaw {
   promptHash  String
   model       String
   createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   itinerary Itinerary @relation(fields: [itineraryId], references: [id])
 
-  /// Prisma lacks native CHECK syntax; keep JSON shape enforcement in service validation.
+  // NOTE: CHECK jsonb_typeof(rawJson)='object' must be enforced in service layer; Prisma has no portable CHECK support.
 }
 
