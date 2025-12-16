@@ -1,37 +1,27 @@
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
-import { ItineraryEditor } from "@/features/itinerary/components/ItineraryEditor";
+import { ItineraryDetailClient } from "@/features/itinerary/components/ItineraryDetailClient";
+import { api, ApiError } from "@/shared/api/client";
 import { ItineraryFormValues } from "@/shared/validation/itinerary.schema";
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
-
-async function fetchItinerary(id: string): Promise<ItineraryFormValues | null> {
-  const token = cookies().get("shin_access_token")?.value;
-  if (!token) return null;
-  const res = await fetch(`${BASE_URL}/itineraries/${id}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
-  return {
-    id: data.id,
-    title: data.title,
-    version: data.version,
-    days: data.days ?? [],
-  };
-}
-
 export default async function ItineraryDetailPage({ params, searchParams }: { params: { id: string }; searchParams: { jobId?: string } }) {
-  const itinerary = await fetchItinerary(params.id);
-  if (!itinerary) {
-    notFound();
+  const token = cookies().get("shin_access_token")?.value;
+  if (!token) {
+    return <p className="p-6 text-sm text-slate-600">詳細を表示するにはログインしてください。</p>;
   }
+
+  let itinerary: ItineraryFormValues | null = null;
+  try {
+    itinerary = await api.getItinerary(params.id, { token, cookieToken: token });
+  } catch (err) {
+    const apiErr = err as ApiError;
+    if (apiErr.status === 404) notFound();
+  }
+
   return (
     <main className="mx-auto max-w-5xl px-6 py-8">
       <h1 className="text-xl font-bold">旅程詳細</h1>
-      {searchParams.jobId && <p className="text-xs text-slate-500">jobId: {searchParams.jobId}</p>}
-      <ItineraryEditor itinerary={itinerary!} />
+      <ItineraryDetailClient id={params.id} jobId={searchParams.jobId} initialItinerary={itinerary} />
     </main>
   );
 }
