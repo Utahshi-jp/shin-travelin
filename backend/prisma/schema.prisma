@@ -4,28 +4,184 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum DraftStatus {
+  ACTIVE
+  EXPIRED
+}
+
+enum GenerationJobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum Weather {
+  SUNNY
+  RAINY
+  CLOUDY
+  UNKNOWN
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String     @id @default(uuid())
+  email        String     @unique
+  passwordHash String
+  displayName  String
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 
-  trips     Trip[]
+  drafts      Draft[]
+  itineraries Itinerary[]
 }
 
-model Trip {
-  id          String   @id @default(cuid())
-  title       String
-  origin      String
-  destination String
-  days        Int
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+model Draft {
+  id           String      @id @default(uuid())
+  userId       String
+  origin       String
+  destinations String[]
+  startDate    DateTime
+  endDate      DateTime
+  budget       Int
+  purposes     String[]
+  memo         String?
+  status       DraftStatus @default(ACTIVE)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
 
-  user   User?   @relation(fields: [userId], references: [id])
-  userId String?
+  user            User            @relation(fields: [userId], references: [id])
+  companionDetail CompanionDetail?
+  generationJobs  GenerationJob[]
+  itineraries     Itinerary[]
+
+  /// DB-level start/end check is enforced in service layer because Prisma does not yet emit CHECK constraints.
+  @@index([userId])
+  @@index([status, createdAt])
+}
+
+model CompanionDetail {
+  id         String @id @default(uuid())
+  draftId    String @unique
+  adultMale  Int    @default(0)
+  adultFemale Int   @default(0)
+  boy        Int    @default(0)
+  girl       Int    @default(0)
+  infant     Int    @default(0)
+  pet        Int    @default(0)
+  other      Int    @default(0)
+
+  draft Draft @relation(fields: [draftId], references: [id])
+}
+
+model GenerationJob {
+  id          String              @id @default(uuid())
+  draftId     String
+  status      GenerationJobStatus
+  retryCount  Int                 @default(0)
+  partialDays Int[]               @default([])
+  targetDays  Int[]               @default([])
+  model       String?
+  temperature Float?
+  promptHash  String?
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  itineraryId String?
+  error       String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  draft     Draft    @relation(fields: [draftId], references: [id])
+  audits    AiGenerationAudit[]
+  itinerary Itinerary? @relation(fields: [itineraryId], references: [id])
+
+  @@index([draftId, status])
+  @@index([status])
+  @@unique([draftId, model, temperature, promptHash])
+}
+
+model AiGenerationAudit {
+  id            String              @id @default(uuid())
+  jobId         String
+  correlationId String
+  prompt        String?
+  request       Json?
+  rawResponse   String?
+  parsed        Json?
+  status        GenerationJobStatus
+  retryCount    Int                 @default(0)
+  errorMessage  String?
+  model         String?
+  temperature   Float?
+  createdAt     DateTime            @default(now())
+
+  job GenerationJob @relation(fields: [jobId], references: [id])
+
+  @@index([jobId, createdAt])
+}
+
+model Itinerary {
+  id              String            @id @default(uuid())
+  userId          String
+  draftId         String
+  generationJobId String?
+  title           String
+  version         Int               @default(1)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  user          User          @relation(fields: [userId], references: [id])
+  draft         Draft         @relation(fields: [draftId], references: [id])
+  generationJob GenerationJob? @relation(fields: [generationJobId], references: [id])
+  days          ItineraryDay[]
+  raw           ItineraryRaw?
+
+  @@index([userId, createdAt])
+  @@index([draftId])
+}
+
+model ItineraryDay {
+  id          String    @id @default(uuid())
+  itineraryId String
+  dayIndex    Int
+  date        DateTime
+  createdAt   DateTime  @default(now())
+
+  itinerary Itinerary @relation(fields: [itineraryId], references: [id])
+  activities Activity[]
+
+  @@unique([itineraryId, dayIndex])
+}
+
+model Activity {
+  id             String       @id @default(uuid())
+  itineraryDayId String
+  time           String
+  location       String
+  content        String
+  url            String?
+  weather        Weather
+  orderIndex     Int
+  createdAt      DateTime     @default(now())
+
+  day ItineraryDay @relation(fields: [itineraryDayId], references: [id])
+
+  @@unique([itineraryDayId, orderIndex])
+  @@index([itineraryDayId, orderIndex])
+}
+
+model ItineraryRaw {
+  id          String   @id @default(uuid())
+  itineraryId String   @unique
+  rawJson     Json
+  promptHash  String
+  model       String
+  createdAt   DateTime @default(now())
+
+  itinerary Itinerary @relation(fields: [itineraryId], references: [id])
+
+  /// Prisma lacks native CHECK syntax; keep JSON shape enforcement in service validation.
 }
 
