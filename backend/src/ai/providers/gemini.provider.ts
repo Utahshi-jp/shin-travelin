@@ -14,6 +14,48 @@ export class GeminiProviderError extends Error {
 export class GeminiProvider {
   async generate(prompt: string, model: string, temperature: number) {
     const apiKey = process.env.GEMINI_API_KEY;
+    const isTest = process.env.NODE_ENV === 'test';
+    const shouldMock = process.env.USE_MOCK_GEMINI === 'true' || (!apiKey && isTest);
+
+    if (shouldMock) {
+      // Why: e2e/unit テストでは本物の LLM を呼ばずに deterministic な応答を返し、タイムアウトやコストを防ぐ。
+      const mockDate = new Date('2025-01-01').toISOString().slice(0, 10);
+      const mockJson = {
+        title: 'Mock Trip',
+        days: [
+          {
+            dayIndex: 0,
+            date: mockDate,
+            scenario: 'SUNNY',
+            activities: [
+              {
+                time: '09:00',
+                location: 'Test Location',
+                content: `Generated from prompt hash ${prompt.slice(0, 16)}`,
+                weather: 'SUNNY',
+                orderIndex: 0,
+              },
+            ],
+          },
+          {
+            dayIndex: 0,
+            date: mockDate,
+            scenario: 'RAINY',
+            activities: [
+              {
+                time: '13:00',
+                location: 'Indoor Venue',
+                content: 'Alternative plan for bad weather',
+                weather: 'RAINY',
+                orderIndex: 0,
+              },
+            ],
+          },
+        ],
+      };
+      return { rawText: JSON.stringify(mockJson), rawResponse: mockJson, request: { mock: true, prompt, model, temperature } };
+    }
+
     if (!apiKey) {
       throw new InternalServerErrorException({ code: 'AI_PROVIDER_ERROR', message: 'GEMINI_API_KEY is not configured' });
     }

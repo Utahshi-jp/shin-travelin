@@ -1,8 +1,9 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FormProvider, useFieldArray, useForm } from "react-hook-form";
 import { api, ApiError } from "@/shared/api/client";
 import { draftFormSchema, DraftFormValues } from "@/shared/validation/draft.schema";
@@ -13,6 +14,12 @@ export default function Home() {
   const router = useRouter();
   const { push } = useToast();
   const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const [hasSavedToken, setHasSavedToken] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setHasSavedToken(Boolean(localStorage.getItem("shin_access_token")));
+  }, []);
 
   const form = useForm<DraftFormValues>({
     resolver: zodResolver(draftFormSchema),
@@ -37,7 +44,11 @@ export default function Home() {
     try {
       const draft = await api.createDraft(values);
       const job = await api.startGeneration({ draftId: draft.id });
-      router.push(`/itineraries/${draft.id}?jobId=${job.jobId}`);
+      if (job.itineraryId) {
+        router.push(`/itineraries/${job.itineraryId}`);
+      } else {
+        router.push(`/itineraries/${draft.id}?jobId=${job.jobId}`);
+      }
     } catch (err) {
       if (err instanceof ApiError) {
         push({ message: `${err.code}: ${err.message}`, variant: "error", correlationId: err.correlationId });
@@ -56,6 +67,7 @@ export default function Home() {
     // Why: CSRではlocalStorage、SSR一覧ではCookie経由で再利用するため両経路に保存。
     localStorage.setItem("shin_access_token", token);
     document.cookie = `shin_access_token=${token}; path=/; SameSite=Lax`;
+    setHasSavedToken(true);
   };
 
   const handleLogin = async (email: string, password: string) => {
@@ -82,6 +94,18 @@ export default function Home() {
     <main className="mx-auto max-w-5xl px-6 py-10">
       <h1 className="text-2xl font-bold">shin-travelin</h1>
       <p className="text-sm text-slate-600">旅行条件を入力して生成を開始します（ログイン必須）。</p>
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <Link
+          href="/itineraries"
+          prefetch={false}
+          className={`rounded px-4 py-2 text-sm font-semibold ${hasSavedToken ? "bg-slate-900 text-white" : "border border-dashed border-slate-400 text-slate-500"}`}
+        >
+          保存した旅程を見る
+        </Link>
+        <p className="text-xs text-slate-500">
+          {hasSavedToken ? "保存済みの旅程をすぐに確認できます" : "ログインすると保存済みの旅程にアクセスできます"}
+        </p>
+      </div>
 
       <AuthBox onLogin={handleLogin} onRegister={handleRegister} message={authMessage} />
 

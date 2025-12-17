@@ -18,6 +18,7 @@ export const itinerarySchema = z.object({
       id: z.string().optional(),
       dayIndex: z.number().min(0),
       date: z.string(),
+      scenario: z.enum(["SUNNY", "RAINY"]),
       activities: z.array(activitySchema),
     }),
   ),

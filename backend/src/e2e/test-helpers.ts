@@ -35,6 +35,11 @@ export async function resetDatabase() {
   await prisma.user.deleteMany();
 }
 
+export async function seedDraft(app: INestApplication, token: string) {
+  const draftId = await createDraft(app, token);
+  return draftId;
+}
+
 export async function createTestUser() {
   const password = 'Password123!';
   const email = `user+${Date.now()}@example.com`;

@@ -1,12 +1,13 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { GenerationJobStatus, Prisma, Weather } from '@prisma/client';
+import { DayScenario, GenerationJobStatus, Prisma, Weather } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ErrorCode } from '../shared/error-codes';
 import { AiService } from '../ai/ai.service';
-import { CreateItineraryDto } from './dto/create-itinerary.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
 import { RegenerateDto } from './dto/regenerate.dto';
+import { ListItinerariesQueryDto } from './dto/list-itineraries.dto';
+import { persistItineraryGraph, sortDays } from './itinerary.persistence';
 
 /**
  * Itinerary service manages optimistic locking and normalized persistence (AR-8/AR-9/AR-10).
@@ -15,83 +16,77 @@ import { RegenerateDto } from './dto/regenerate.dto';
 export class ItinerariesService {
   constructor(private readonly prisma: PrismaService, private readonly aiService: AiService) {}
 
-  async create(dto: CreateItineraryDto, userId: string) {
-    const job = await this.prisma.generationJob.findUnique({ include: { draft: true }, where: { id: dto.jobId } });
-    if (!job) throw new NotFoundException({ code: ErrorCode.NOT_FOUND, message: 'Job not found' });
-    if (job.draft.userId !== userId) throw new ForbiddenException({ code: ErrorCode.FORBIDDEN, message: 'Forbidden' });
-    if (job.status !== GenerationJobStatus.SUCCEEDED) {
-      throw new ConflictException({ code: ErrorCode.JOB_CONFLICT, message: 'Job not finished' });
-    }
-    if (job.itineraryId) {
-      throw new ConflictException({ code: ErrorCode.VERSION_CONFLICT, message: 'Itinerary already exists for this job' });
-    }
-    if (job.draftId !== dto.draftId) {
-      throw new ConflictException({ code: ErrorCode.VERSION_CONFLICT, message: 'Draft mismatch for job' });
-    }
-
-    const itinerary = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.itinerary.create({
-        data: {
-          userId,
-          draftId: dto.draftId,
-          title: dto.title,
-        },
-      });
-
-      for (const [dayIndex, day] of dto.days.entries()) {
-        const dayRow = await tx.itineraryDay.create({
-          data: {
-            itineraryId: created.id,
-            dayIndex,
-            date: new Date(day.date),
-          },
-        });
-
-        await tx.activity.createMany({
-          data: day.activities.map((activity) => ({
-            itineraryDayId: dayRow.id,
-            time: activity.time,
-            location: activity.location,
-            content: activity.content,
-            url: activity.url,
-            weather: (activity.weather ?? 'UNKNOWN') as Weather,
-            orderIndex: activity.orderIndex,
-          })),
-        });
-      }
-
-      await tx.itineraryRaw.create({
-        data: {
-          itineraryId: created.id,
-          rawJson: dto.rawJson ?? (dto as unknown as Prisma.JsonObject),
-          promptHash: job.promptHash ?? 'pending-hash',
-          model: job.model ?? 'gemini-pro',
-        },
-      });
-
-      await tx.generationJob.update({ where: { id: dto.jobId }, data: { itineraryId: created.id } });
-
-      return created;
-    });
-    return { id: itinerary.id, version: itinerary.version };
+  async create() {
+    throw new ConflictException({ code: ErrorCode.VERSION_CONFLICT, message: 'Manual creation is disabled in auto-save mode' });
   }
 
-  async list(userId: string, page = 1, pageSize = 10) {
-    const [items, total] = await this.prisma.$transaction([
+  async list(userId: string, query: ListItinerariesQueryDto, pageSize = 10) {
+    const page = query.page ?? 1;
+    const where: Prisma.ItineraryWhereInput = { userId };
+
+    if (query.keyword) {
+      where.title = { contains: query.keyword, mode: 'insensitive' };
+    }
+
+    if (query.startDate || query.endDate) {
+      const dateFilter: Prisma.NestedDateTimeFilter = {};
+      if (query.startDate) dateFilter.gte = new Date(query.startDate);
+      if (query.endDate) dateFilter.lte = new Date(query.endDate);
+      where.days = { some: { date: dateFilter } };
+    }
+
+    if (query.purpose) {
+      where.draft = { purposes: { has: query.purpose } };
+    }
+
+    const [rawItems, total] = await this.prisma.$transaction([
       this.prisma.itinerary.findMany({
-        where: { userId },
+        where,
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: { days: { include: { activities: true } } },
+        select: {
+          id: true,
+          title: true,
+          version: true,
+          createdAt: true,
+          draft: { select: { purposes: true } },
+          days: { select: { date: true, scenario: true }, orderBy: [{ dayIndex: 'asc' }, { scenario: 'asc' }] },
+        },
       }),
-      this.prisma.itinerary.count({ where: { userId } }),
+      this.prisma.itinerary.count({ where }),
     ]);
-    return { items, page, total };
+
+    const items = rawItems.map((itinerary) => {
+      const sunnyDays = itinerary.days.filter((day) => day.scenario === DayScenario.SUNNY);
+      const primary = sunnyDays.length ? sunnyDays : itinerary.days;
+      const firstDate = primary.length ? primary[0].date.toISOString() : null;
+      const lastDate = primary.length ? primary[primary.length - 1].date.toISOString() : null;
+      return {
+        id: itinerary.id,
+        title: itinerary.title,
+        version: itinerary.version,
+        createdAt: itinerary.createdAt,
+        firstDate,
+        lastDate,
+        purposes: itinerary.draft?.purposes ?? [],
+      };
+    });
+
+    return { items, page, total, pageSize };
   }
 
   async getById(id: string, userId: string) {
-    const itinerary = await this.prisma.itinerary.findUnique({ include: { days: { include: { activities: true } }, raw: true }, where: { id } });
+    const itinerary = await this.prisma.itinerary.findUnique({
+      include: {
+        days: {
+          include: { activities: { orderBy: { orderIndex: 'asc' } } },
+          orderBy: [{ dayIndex: 'asc' }, { scenario: 'asc' }],
+        },
+        raw: true,
+      },
+      where: { id },
+    });
     if (!itinerary) throw new NotFoundException({ code: ErrorCode.NOT_FOUND, message: 'Itinerary not found' });
     if (itinerary.userId !== userId) throw new ForbiddenException({ code: ErrorCode.FORBIDDEN, message: 'Forbidden' });
     return itinerary;
@@ -106,7 +101,41 @@ export class ItinerariesService {
     }
 
     const nextVersion = itinerary.version + 1;
-    await this.prisma.itinerary.update({ where: { id }, data: { title: dto.title ?? itinerary.title, version: nextVersion } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.itinerary.update({ where: { id }, data: { title: dto.title ?? itinerary.title, version: nextVersion } });
+
+      if (dto.days) {
+        const existingDayIds = itinerary.days.map((day) => day.id);
+        if (existingDayIds.length) {
+          await tx.activity.deleteMany({ where: { itineraryDayId: { in: existingDayIds } } });
+          await tx.itineraryDay.deleteMany({ where: { id: { in: existingDayIds } } });
+        }
+
+        const sortedDays = sortDays(dto.days);
+        for (const day of sortedDays) {
+          const dayRow = await tx.itineraryDay.create({
+            data: {
+              itineraryId: id,
+              dayIndex: day.dayIndex,
+              date: new Date(day.date),
+              scenario: (day.scenario as DayScenario) ?? DayScenario.SUNNY,
+            },
+          });
+
+          await tx.activity.createMany({
+            data: day.activities.map((activity, idx) => ({
+              itineraryDayId: dayRow.id,
+              time: activity.time,
+              location: activity.location,
+              content: activity.content,
+              url: activity.url,
+              weather: (activity.weather ?? 'UNKNOWN') as Weather,
+              orderIndex: Number.isFinite(activity.orderIndex) ? activity.orderIndex : idx,
+            })),
+          });
+        }
+      }
+    });
 
     return { version: nextVersion };
   }

@@ -10,6 +10,9 @@ import { prisma, resetDatabase, createTestUser, loginAndGetToken, createDraft, c
 import { GenerationJobStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 
+jest.setTimeout(20000); // Why: e2e tests hit real DB + pipeline mock and regularly exceed default 5s.
+process.env.USE_MOCK_GEMINI = 'true'; // Why: prevent real Gemini calls during e2e while preserving prod behavior.
+
 // e2e tests focus on brittle behaviors to replace manual curl checks.
 describe('Backend e2e', () => {
   let app: INestApplication;

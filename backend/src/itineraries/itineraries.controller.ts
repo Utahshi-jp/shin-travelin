@@ -4,9 +4,9 @@ import { randomUUID } from 'crypto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { ItinerariesService } from './itineraries.service';
-import { CreateItineraryDto } from './dto/create-itinerary.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
 import { RegenerateDto, RegenerateRequestDto } from './dto/regenerate.dto';
+import { ListItinerariesQueryDto } from './dto/list-itineraries.dto';
 
 @Controller('itineraries')
 @UseGuards(JwtAuthGuard)
@@ -17,18 +17,17 @@ export class ItinerariesController {
    * Persists generated itinerary after job success (AR-8).
    */
   @Post()
-  @HttpCode(HttpStatus.CREATED)
-  create(@Body() dto: CreateItineraryDto, @CurrentUser() user: { id: string }) {
-    return this.itinerariesService.create(dto, user.id);
+  @HttpCode(HttpStatus.GONE)
+  create() {
+    return { message: 'Manual itinerary creation has been replaced by automatic persistence.' };
   }
 
   /**
    * SSR-backed list endpoint with simple pagination (FR-3).
    */
   @Get()
-  list(@CurrentUser() user: { id: string }, @Query('page') page?: string) {
-    const pageNum = page ? parseInt(page, 10) || 1 : 1;
-    return this.itinerariesService.list(user.id, pageNum);
+  list(@CurrentUser() user: { id: string }, @Query() query: ListItinerariesQueryDto) {
+    return this.itinerariesService.list(user.id, query);
   }
 
   /**
