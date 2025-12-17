@@ -177,6 +177,8 @@ export function ItineraryEditor({ itinerary, onReloadLatest, highlights }: Props
           return (
             <article
               key={`day-${day.dayIndex}`}
+              id={`day-${day.dayIndex}`}
+              data-itinerary-day={day.dayIndex}
               className={`space-y-3 rounded border p-4 ${highlightClass(day.dayIndex, highlights)}`}
             >
               <header className="flex flex-wrap items-center justify-between gap-3">
