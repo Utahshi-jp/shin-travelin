@@ -1,36 +1,58 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# shin-travelin
+
+AI 補助付き旅程作成ツール。Next.js 15 (App Router) と NestJS 11 + Prisma 7 で構成し、docs/ 以下の要件定義・設計書をソースオブトゥルースとして運用します。
+
+## Tech Stack
+
+- Frontend: Next.js 15, React 19, React Hook Form, TanStack Query.
+- Backend: NestJS 11, Prisma 7, PostgreSQL.
+- Infrastructure: Docker Compose for local multi-service boot, scripts/verify-artifact.mjs で成果物検証。
+
+## Repository Layout
+
+- docs/: requirements/basic/detail/db/legacy ドキュメント群。
+- src/: Next.js アプリケーション（App Router）。
+- backend/: NestJS + Prisma。`backend/prisma/schema.prisma` が単一の DB スキーマ定義。
+- public/: 静的アセット。
+- scripts/: 補助スクリプト（例: verify-artifact.mjs）。
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# Install dependencies
+npm install
+npm install --prefix backend
+
+# Start backend API
+npm run dev:api
+
+# Start frontend (別ターミナル)
+
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+API は http://localhost:4000 、Next.js は http://localhost:3000 で起動します。`.env` と `backend/.env` に API キーや DB URL を設定してください。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Artifact Checklist (必須)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+ZIP などで成果物を提出する前に、必要フォルダが含まれているかを自動検証してください。
 
-## Learn More
+```bash
+npm run verify:artifact
+```
 
-To learn more about Next.js, take a look at the following resources:
+欠損がある場合はエラーになります。`docs/requirements.md` や `backend/prisma/schema.prisma` など、レビュアーが前提とするファイルが抜けた状態での提出を防げます。パッケージング時は `git archive -o shin-travelin.zip HEAD` など Git 管理下の内容をそのまま出力する方法を推奨します。
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Testing
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- Frontend: add React Testing Library specs under `src/**/__tests__`（予定）。
+- Backend: `npm run test` / `npm run test:e2e` within `backend/`。
 
-## Deploy on Vercel
+## Conventions
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Conventional Commits (`feat:`, `fix:`...)。
+- Cache 制御: `shared/api/client.ts` 経由の fetch は `cache: \"no-store\"` を強制。
+- 認証トークンは Cookie + Authorization header の両方を送信し SSR/CSR で共通化。
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Support
+
+問題があれば issue に記載し、再現手順とログ、`verify:artifact` の結果を添付してください。

@@ -24,10 +24,12 @@ describe('AiService.enqueue', () => {
         findFirst: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
+        findUnique: jest.fn(),
       },
     } as any;
     prisma.draft.findUnique.mockResolvedValue(draft);
     prisma.generationJob.create.mockResolvedValue({ id: 'job-1', itineraryId: null });
+    prisma.generationJob.findUnique.mockResolvedValue({ id: 'job-1', status: GenerationJobStatus.SUCCEEDED, itineraryId: null, error: null });
     return prisma;
   };
 

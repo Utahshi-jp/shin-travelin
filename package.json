@@ -4,9 +4,10 @@
   "private": true,
   
   "scripts": {
-    "dev": "next dev --turbopack",
+    "dev": "next dev",
     "dev:api": "npm run start:dev --prefix backend",
-    "dev:full": "concurrently \"npm run dev\" \"npm run dev:api\""
+    "dev:full": "concurrently \"npm run dev\" \"npm run dev:api\"",
+    "verify:artifact": "node ./scripts/verify-artifact.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

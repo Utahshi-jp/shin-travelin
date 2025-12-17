@@ -39,6 +39,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
     switch (status) {
       case HttpStatus.BAD_REQUEST:
         return ErrorCode.VALIDATION_ERROR;
+      case HttpStatus.UNPROCESSABLE_ENTITY:
+        // Why: ValidationPipe は 422 を返すため、要件の共通エラーコード VALIDATION_ERROR に正規化する。
+        return ErrorCode.VALIDATION_ERROR;
       case HttpStatus.UNAUTHORIZED:
         return ErrorCode.UNAUTHORIZED;
       case HttpStatus.FORBIDDEN:

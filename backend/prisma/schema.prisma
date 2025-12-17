@@ -29,6 +29,11 @@ enum Weather {
   UNKNOWN
 }
 
+enum DayScenario {
+  SUNNY
+  RAINY
+}
+
 /// User accounts; owns Drafts and Itineraries (requirements FR/AR auth baseline).
 model User {
   id           String   @id @default(uuid())
@@ -168,13 +173,14 @@ model ItineraryDay {
   itineraryId String
   dayIndex    Int
   date        DateTime
+  scenario    DayScenario @default(SUNNY)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
   itinerary Itinerary @relation(fields: [itineraryId], references: [id])
   activities Activity[]
 
-  @@unique([itineraryId, dayIndex])
+  @@unique([itineraryId, dayIndex, scenario])
 }
 
 /// Activity stores ordered items within a day; (itineraryDayId, orderIndex) unique keeps stable ordering (requirements DB-1, basic-design §5.2).

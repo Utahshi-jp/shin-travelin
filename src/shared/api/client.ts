@@ -20,6 +20,13 @@ export class ApiError extends Error {
 }
 
 export type AuthTokens = { token?: string; cookieToken?: string };
+export type ItineraryListQuery = {
+  page?: number;
+  keyword?: string;
+  startDate?: string;
+  endDate?: string;
+  purpose?: string;
+};
 
 const errorSchema = z.object({ code: z.string(), message: z.string(), details: z.any().optional(), correlationId: z.string().optional() });
 
@@ -88,13 +95,22 @@ export const api = {
     }),
   getDraft: (id: string, auth?: AuthTokens) => apiFetch(`/drafts/${id}`, { auth }),
   startGeneration: (body: { draftId: string; targetDays?: number[] }) =>
-    apiFetch<{ jobId: string; status: string }>("/ai/generate", { method: "POST", body: JSON.stringify(body) }),
+    apiFetch<{ jobId: string; status: string; itineraryId?: string }>("/ai/generate", { method: "POST", body: JSON.stringify(body) }),
   getJobStatus: (id: string, auth?: AuthTokens) =>
     apiFetch<{ status: string; retryCount: number; partialDays: number[]; error?: string }>(`/ai/jobs/${id}`, { auth }),
-  listItineraries: (page?: number, auth?: AuthTokens) => apiFetch(`/itineraries${page ? `?page=${page}` : ""}`, { auth }),
+  listItineraries: (params?: ItineraryListQuery, auth?: AuthTokens) => {
+    const search = new URLSearchParams();
+    if (params?.page && params.page > 1) search.set("page", String(params.page));
+    if (params?.keyword) search.set("keyword", params.keyword);
+    if (params?.startDate) search.set("startDate", params.startDate);
+    if (params?.endDate) search.set("endDate", params.endDate);
+    if (params?.purpose) search.set("purpose", params.purpose);
+    const suffix = search.toString();
+    return apiFetch(`/itineraries${suffix ? `?${suffix}` : ""}`, { auth });
+  },
   getItinerary: (id: string, auth?: AuthTokens) => apiFetch(`/itineraries/${id}`, { auth }),
   updateItinerary: (id: string, body: unknown) => apiFetch(`/itineraries/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   regenerateItinerary: (id: string, days: number[]) =>
-    apiFetch(`/itineraries/${id}/regenerate`, { method: "POST", body: JSON.stringify({ days }) }),
+    apiFetch<{ jobId: string }>(`/itineraries/${id}/regenerate`, { method: "POST", body: JSON.stringify({ days }) }),
   getPrintable: (id: string, auth?: AuthTokens) => apiFetch(`/itineraries/${id}/print`, { auth }),
 };

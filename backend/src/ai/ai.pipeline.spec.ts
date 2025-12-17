@@ -42,7 +42,8 @@ describe('AiPipeline retry flow', () => {
     const prisma = mockPrisma();
     const provider = {
       generate: jest.fn(async () => ({
-        rawText: '```json{"title":"trip","days":[{"dayIndex":0,"date":"2025-01-01","activities":[{"time":"09:00","location":"A","content":"B","weather":"SUN","orderIndex":0}]}]} ```',
+        rawText:
+          '```json{"title":"trip","days":[{"dayIndex":0,"date":"2025-01-01","scenario":"SUNNY","activities":[{"time":"09:00","location":"A","content":"B","weather":"SUN","orderIndex":0}]}]} ```',
         rawResponse: {},
         request: {},
       })),

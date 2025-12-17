@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsDateString, IsInt, IsOptional, IsString, IsUUID, Length, Matches, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsDateString, IsEnum, IsInt, IsOptional, IsString, IsUUID, Length, Matches, MaxLength, Min, ValidateNested } from 'class-validator';
 
 class ActivityDto {
   @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: 'time must be HH:mm' })
@@ -27,9 +27,22 @@ class ActivityDto {
   orderIndex!: number;
 }
 
+export enum DayScenarioValue {
+  SUNNY = 'SUNNY',
+  RAINY = 'RAINY',
+}
+
 class DayDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  dayIndex!: number;
+
   @IsDateString()
   date!: string;
+
+  @IsEnum(DayScenarioValue)
+  scenario!: DayScenarioValue;
 
   @IsArray()
   @ValidateNested({ each: true })
