@@ -4,7 +4,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { FormProvider, useFieldArray, useForm } from "react-hook-form";
+import { FormProvider, useFieldArray, useForm, useFormContext, useWatch } from "react-hook-form";
+import type { FieldPath } from "react-hook-form";
 import { api, ApiError } from "@/shared/api/client";
 import { draftFormSchema, DraftFormValues } from "@/shared/validation/draft.schema";
 import { scrollToFirstError } from "@/shared/validation/scrollToFirstError";
@@ -162,6 +163,7 @@ export default function Home() {
                   helperId="originHelp"
                   description="集合場所や出発空港など、3-200文字で具体的に入力してください。"
                   error={form.formState.errors.origin?.message}
+                  formPath="origin"
                 >
                   <input
                     {...form.register("origin")}
@@ -190,6 +192,10 @@ export default function Home() {
                       </button>
                     </div>
                   </div>
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-red-700">
+                    <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 font-semibold">必須</span>
+                    <span>最低 1 件の目的地を登録してください。</span>
+                  </div>
                   <p className="text-xs text-slate-500">主要な都市や立ち寄りたいエリアを優先順で入力してください。</p>
                   <div className="space-y-3">
                     {destArray.fields.map((field, index) => (
@@ -199,6 +205,7 @@ export default function Home() {
                         name={`destination-${index}`}
                         description={index === 0 ? "最初の目的地を入力してください。具体的なスポット名でも構いません。" : undefined}
                         error={form.formState.errors.destinations?.[index]?.message as string | undefined}
+                        formPath={`destinations.${index}` as const}
                       >
                         <div className="flex gap-3">
                           <input
@@ -230,6 +237,7 @@ export default function Home() {
                     name="startDate"
                     description="出発予定日を選択します。"
                     error={form.formState.errors.startDate?.message}
+                    formPath="startDate"
                   >
                     <input
                       type="date"
@@ -244,6 +252,7 @@ export default function Home() {
                     name="endDate"
                     description="最終日を選択すると日数を自動で算出します。"
                     error={form.formState.errors.endDate?.message}
+                    formPath="endDate"
                   >
                     <input
                       type="date"
@@ -259,6 +268,7 @@ export default function Home() {
                   name="budget"
                   description="5,000〜5,000,000円の範囲で入力。おおよその合計金額で問題ありません。"
                   error={form.formState.errors.budget?.message}
+                  formPath="budget"
                 >
                   <input
                     type="number"
@@ -291,6 +301,10 @@ export default function Home() {
                       </button>
                     </div>
                   </div>
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-red-700">
+                    <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 font-semibold">必須</span>
+                    <span>最低 1 件の目的を登録してください。</span>
+                  </div>
                   <p className="text-xs text-slate-500">例: 家族旅行 / グルメ / リモートワーク / アクティビティ重視 など</p>
                   <div className="space-y-3">
                     {purposesArray.fields.map((field, index) => (
@@ -299,6 +313,7 @@ export default function Home() {
                         label={`目的 ${index + 1}`}
                         name={`purpose-${index}`}
                         error={form.formState.errors.purposes?.[index]?.message as string | undefined}
+                        formPath={`purposes.${index}` as const}
                       >
                         <div className="flex gap-3">
                           <input
@@ -330,7 +345,14 @@ export default function Home() {
                       const errorMap = form.formState.errors.companions as Partial<Record<typeof key, { message?: string }>> | undefined;
                       const errorText = errorMap?.[key]?.message;
                       return (
-                        <Field key={key} label={label} name={`companions-${key}`} required={false} error={errorText}>
+                        <Field
+                          key={key}
+                          label={label}
+                          name={`companions-${key}`}
+                          required={false}
+                          error={errorText}
+                          formPath={`companions.${key}` as const}
+                        >
                           <input
                             type="number"
                             min={0}
@@ -352,7 +374,7 @@ export default function Home() {
                 description="特別な制約（例: アレルギー、車いす利用など）があれば記載してください。"
                 tone="muted"
               >
-                <Field label="備考" name="memo" required={false} error={form.formState.errors.memo?.message}>
+                <Field label="備考" name="memo" required={false} error={form.formState.errors.memo?.message} formPath="memo">
                   <textarea
                     {...form.register("memo")}
                     rows={3}
@@ -450,16 +472,29 @@ type FieldProps = {
   description?: string;
   helperId?: string;
   required?: boolean;
+  formPath?: FieldPath<DraftFormValues>;
 };
 
-function Field({ label, name, children, error, description, helperId, required = true }: FieldProps) {
+function Field({ label, name, children, error, description, helperId, required = true, formPath }: FieldProps) {
+  const formContext = useFormContext<DraftFormValues>();
+  const watchedValue = useWatch({ control: formContext.control, name: formPath });
+  const isFilled = (() => {
+    if (watchedValue === undefined || watchedValue === null) return false;
+    if (typeof watchedValue === "string") return watchedValue.trim().length > 0;
+    if (typeof watchedValue === "number") return true;
+    if (typeof watchedValue === "boolean") return watchedValue;
+    if (Array.isArray(watchedValue)) return watchedValue.length > 0;
+    if (typeof watchedValue === "object") return Object.keys(watchedValue).length > 0;
+    return false;
+  })();
+  const showRequired = required && (!formPath || !isFilled);
   return (
     <div className="space-y-2 text-sm">
       <div className="flex items-center gap-2">
         <label htmlFor={name} className="font-semibold text-slate-900">
           {label}
         </label>
-        <StatusBadge tone={required ? "critical" : "neutral"}>{required ? "必須" : "任意"}</StatusBadge>
+        {showRequired ? <StatusBadge tone="critical">必須</StatusBadge> : !required ? <StatusBadge tone="neutral">任意</StatusBadge> : null}
       </div>
       {description && (
         <p id={helperId} className="text-xs text-slate-500">
@@ -541,6 +576,7 @@ function AuthBox({ onLogin, onRegister, feedback }: AuthBoxProps) {
             className={inputClass}
             placeholder="例: 旅のしおり作成チーム"
           />
+          <p className="text-[11px] text-slate-500">旅程の作成者名としてサーバーに保存され、共有ログなどで参照されます。</p>
         </label>
       </div>
       <div className="flex flex-wrap gap-2">

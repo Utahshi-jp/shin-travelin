@@ -1,12 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "@/shared/api/client";
 import { KeyValueList } from "@/shared/ui/KeyValueList";
 import { Loading } from "@/shared/ui/Loading";
 import { SectionCard } from "@/shared/ui/SectionCard";
 import { StateCallout } from "@/shared/ui/StateCallout";
-import { StatusBadge } from "@/shared/ui/StatusBadge";
 import { useToast } from "@/shared/ui/ToastProvider";
 import { ItineraryFormValues } from "@/shared/validation/itinerary.schema";
 import { ItineraryEditor } from "./ItineraryEditor";
@@ -44,7 +44,6 @@ export function ItineraryDetailClient({ id, jobId, initialItinerary }: Props) {
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [pendingDays, setPendingDays] = useState<number[]>([]);
   const [highlights, setHighlights] = useState<Highlights>({ pending: [], completed: [], failed: [] });
-  const [visibleDay, setVisibleDay] = useState<number | null>(null);
   useEffect(() => {
     setItinerary(sanitizeItinerary(initialItinerary));
   }, [initialItinerary]);
@@ -82,24 +81,6 @@ export function ItineraryDetailClient({ id, jobId, initialItinerary }: Props) {
   useEffect(() => {
     setSelectedDays((current) => current.filter((index) => dayOptions.some((day) => day.dayIndex === index)));
   }, [dayOptions]);
-
-  useEffect(() => {
-    const sections = document.querySelectorAll<HTMLElement>("[data-itinerary-day]");
-    if (!sections.length) return () => undefined;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-        if (!visible) return;
-        const nextDay = Number(visible.target.getAttribute("data-itinerary-day"));
-        if (!Number.isNaN(nextDay)) setVisibleDay(nextDay);
-      },
-      { rootMargin: "-30% 0px -55% 0px", threshold: [0.3, 0.6, 0.9] },
-    );
-    sections.forEach((section) => observer.observe(section));
-    return () => observer.disconnect();
-  }, [itinerary]);
 
   useEffect(() => {
     if (!activeJobId) return () => undefined;
@@ -216,12 +197,6 @@ export function ItineraryDetailClient({ id, jobId, initialItinerary }: Props) {
 
   const summary = useMemo(() => buildSummary(itinerary), [itinerary]);
   const jobVariant = resolveJobVariant(jobState?.status ?? null);
-  const scrollToDay = (dayIndex: number) => {
-    const target = document.querySelector<HTMLElement>(`[data-itinerary-day="${dayIndex}"]`);
-    if (target) {
-      target.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  };
 
   if (!itinerary) {
     return (
@@ -333,13 +308,14 @@ export function ItineraryDetailClient({ id, jobId, initialItinerary }: Props) {
           </button>
         </SectionCard>
 
-        <SectionCard tone="muted" title="日別ナビゲーション" description="スクロール中の日付がハイライトされます。">
-          <DayNavigator
-            days={dayOptions}
-            visibleDay={visibleDay}
-            onJump={scrollToDay}
-            highlights={highlights}
-          />
+        <SectionCard
+          tone="muted"
+          title="保存済みの旅程"
+          description="生成済みのスケジュールにいつでも戻れます。"
+        >
+          <p className="text-sm text-slate-600">
+            保存された旅程はすべて <span className="font-semibold">/itineraries</span> に並びます。別旅程と比べたいときや、過去のドラフトに戻りたいときにご利用ください。
+          </p>
           <div className="mt-4 flex flex-wrap gap-2 text-xs">
             <button type="button" onClick={reloadLatest} disabled={isReloading} className="rounded-full border px-3 py-1 disabled:opacity-60">
               最新を再取得
@@ -352,6 +328,12 @@ export function ItineraryDetailClient({ id, jobId, initialItinerary }: Props) {
             >
               全日を再生成
             </button>
+            <Link
+              href="/itineraries"
+              className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+            >
+              保存済み旅程を開く
+            </Link>
           </div>
         </SectionCard>
       </div>
@@ -441,78 +423,15 @@ function StatusLegend({ color, label }: { color: string; label: string }) {
   );
 }
 
-function DayNavigator({
-  days,
-  visibleDay,
-  onJump,
-  highlights,
-}: {
-  days: { dayIndex: number; date: string }[];
-  visibleDay: number | null;
-  onJump: (dayIndex: number) => void;
-  highlights: Highlights;
-}) {
-  if (!days.length) {
-    return <p className="text-sm text-slate-500">日程がまだありません。旅程を再取得してください。</p>;
-  }
-  return (
-    <ul className="space-y-2">
-      {days.map((day) => {
-        const state = highlightState(day.dayIndex, highlights);
-        const tone: "neutral" | "positive" | "warning" | "critical" =
-          state === "completed" ? "positive" : state === "pending" ? "warning" : state === "failed" ? "critical" : "neutral";
-        const label =
-          state === "completed"
-            ? "更新済"
-            : state === "pending"
-              ? "生成中"
-              : state === "failed"
-                ? "要確認"
-                : visibleDay === day.dayIndex
-                  ? "閲覧中"
-                  : "待機中";
-        const isActive = visibleDay === day.dayIndex;
-        return (
-          <li key={day.dayIndex}>
-            <button
-              type="button"
-              onClick={() => onJump(day.dayIndex)}
-              className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition ${
-                isActive ? "border-blue-400 bg-blue-50" : "border-slate-200 bg-white"
-              }`}
-            >
-              <div>
-                <p className="font-semibold text-slate-900">Day {day.dayIndex + 1}</p>
-                <p className="text-xs text-slate-500">{new Date(day.date).toLocaleDateString("ja-JP")}</p>
-              </div>
-              <StatusBadge tone={tone}>{label}</StatusBadge>
-            </button>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-function highlightState(dayIndex: number, highlights: Highlights) {
-  if (highlights.completed.includes(dayIndex)) return "completed" as const;
-  if (highlights.pending.includes(dayIndex)) return "pending" as const;
-  if (highlights.failed.includes(dayIndex)) return "failed" as const;
-  return null;
-}
-
 function buildSummary(itinerary: ItineraryFormValues | null) {
   if (!itinerary) return null;
   const uniqueDays = Array.from(new Set(itinerary.days.map((day) => day.dayIndex))).length;
-  const totalActivities = itinerary.days.reduce((sum, day) => sum + (day.activities?.length ?? 0), 0);
   const range = resolveDateRange(itinerary.days.map((day) => day.date));
   return {
     title: itinerary.title || "無題の旅程",
     items: [
       { label: "日数", value: uniqueDays ? `${uniqueDays} 日` : "未設定", hint: "晴天/悪天候ペアは同じ日としてカウント" },
       { label: "日付", value: range ?? "日付未設定" },
-      { label: "合計アクティビティ", value: `${totalActivities} 件`, hint: "日別のスポット件数を合算" },
-      { label: "version", value: `v${itinerary.version}` },
     ],
   };
 }

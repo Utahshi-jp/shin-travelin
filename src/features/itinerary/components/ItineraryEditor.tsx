@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import {
   Control,
   FieldArrayWithId,
@@ -34,6 +34,25 @@ type DiffResult = { titleChanged: boolean; changedDayLabels: string[] };
 const SCENARIO_LABEL: Record<DayScenario, string> = {
   SUNNY: "晴天プラン",
   RAINY: "悪天候プラン",
+};
+
+const SCENARIO_THEME: Record<DayScenario, { bg: string; border: string; cellBg: string; badgeBg: string; badgeText: string; dot: string }> = {
+  SUNNY: {
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    cellBg: "bg-amber-50",
+    badgeBg: "bg-amber-100",
+    badgeText: "text-amber-900",
+    dot: "bg-amber-500",
+  },
+  RAINY: {
+    bg: "bg-blue-50",
+    border: "border-blue-200",
+    cellBg: "bg-blue-50",
+    badgeBg: "bg-blue-100",
+    badgeText: "text-blue-900",
+    dot: "bg-blue-500",
+  },
 };
 
 export function ItineraryEditor({ itinerary, onReloadLatest, highlights }: Props) {
@@ -166,6 +185,11 @@ export function ItineraryEditor({ itinerary, onReloadLatest, highlights }: Props
           <DiffSummary diff={diff} />
         )}
 
+        <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+          <ScenarioLegend scenario="SUNNY" label="晴天サイド" />
+          <ScenarioLegend scenario="RAINY" label="悪天候サイド" />
+        </div>
+
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={addDayPair} className="rounded border px-3 py-1 text-sm">
             日を追加（晴天/悪天候ペア）
@@ -191,18 +215,19 @@ export function ItineraryEditor({ itinerary, onReloadLatest, highlights }: Props
                     onChange={(event) => handleDayDateChange(day.dayIndex, event.target.value)}
                   />
                 </div>
-                <div className="flex gap-2 text-xs">
-                  <button type="button" onClick={() => moveDay(groupIndex, -1)} disabled={groupIndex === 0} className="rounded border px-2 py-1 disabled:opacity-40">
-                    上へ
-                  </button>
-                  <button
-                    type="button"
+                <div className="flex items-center gap-2 text-xs">
+                  <IconButton
+                    icon={<ArrowIcon direction="up" />}
+                    label={`Day ${day.dayIndex + 1} を上へ移動`}
+                    onClick={() => moveDay(groupIndex, -1)}
+                    disabled={groupIndex === 0}
+                  />
+                  <IconButton
+                    icon={<ArrowIcon direction="down" />}
+                    label={`Day ${day.dayIndex + 1} を下へ移動`}
                     onClick={() => moveDay(groupIndex, 1)}
                     disabled={groupIndex === groupedDays.length - 1}
-                    className="rounded border px-2 py-1 disabled:opacity-40"
-                  >
-                    下へ
-                  </button>
+                  />
                   <button type="button" onClick={() => removeDay(day.dayIndex)} className="rounded border px-2 py-1 text-red-600">
                     削除
                   </button>
@@ -236,6 +261,53 @@ export function ItineraryEditor({ itinerary, onReloadLatest, highlights }: Props
   );
 }
 
+function ScenarioLegend({ scenario, label }: { scenario: DayScenario; label: string }) {
+  const tone = SCENARIO_THEME[scenario];
+  return (
+    <span
+      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold ${tone.border} ${tone.badgeBg} ${tone.badgeText}`}
+    >
+      <span className={`h-2 w-2 rounded-full ${tone.dot}`} aria-hidden="true" />
+      {label}
+    </span>
+  );
+}
+
+type IconButtonProps = {
+  icon: ReactNode;
+  label: string;
+} & ButtonHTMLAttributes<HTMLButtonElement>;
+
+function IconButton({ icon, label, className = "", type = "button", ...props }: IconButtonProps) {
+  return (
+    <button
+      type={type}
+      aria-label={label}
+      title={label}
+      className={`flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 disabled:cursor-not-allowed disabled:opacity-40 ${className}`}
+      {...props}
+    >
+      <span aria-hidden="true">{icon}</span>
+    </button>
+  );
+}
+
+function ArrowIcon({ direction }: { direction: "up" | "down" }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={`h-4 w-4 ${direction === "down" ? "rotate-180" : ""}`}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M6 15l6-6 6 6" />
+    </svg>
+  );
+}
+
 function ScenarioSection({
   control,
   path,
@@ -249,6 +321,7 @@ function ScenarioSection({
   register: UseFormRegister<ItineraryFormValues>;
   errors: FieldErrors<ItineraryFormValues>;
 }) {
+  const tone = SCENARIO_THEME[scenario];
   const activitiesArray = useFieldArray({ control, name: `${path}.activities` as const });
   const dayIndex = Number(path.split(".")[1]);
   const dayErrors = errors.days?.[dayIndex] as any;
@@ -259,55 +332,57 @@ function ScenarioSection({
   };
 
   return (
-    <section className="rounded border border-slate-200 p-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">{SCENARIO_LABEL[scenario]}</h3>
+    <section className={`rounded-xl border p-3 shadow-sm ${tone.border} ${tone.bg}`}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+          <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] ${tone.border} ${tone.badgeBg} ${tone.badgeText}`}>
+            {scenario === "SUNNY" ? "晴" : "雨"}
+          </span>
+          <h3>{SCENARIO_LABEL[scenario]}</h3>
+        </div>
         <button type="button" onClick={addActivity} className="rounded border px-2 py-1 text-xs">
           行を追加
         </button>
       </div>
       <div className="mt-3 space-y-3">
         {activitiesArray.fields.map((field, index) => (
-          <div key={field.id} className="rounded border border-slate-200 p-3">
+          <div key={field.id} className={`rounded border bg-white p-3 ${tone.border}`}>
             <div className="grid gap-2 sm:grid-cols-2">
               <label className="text-xs font-medium">
-                時刻
+                <span className="flex items-center gap-1">時刻</span>
                 <input className="mt-1 w-full rounded border px-2 py-1" {...register(`${path}.activities.${index}.time` as const)} />
                 {activityErrors?.[index]?.time && <span className="text-[11px] text-red-600">{activityErrors[index].time.message}</span>}
               </label>
               <label className="text-xs font-medium">
-                場所
+                <span className="flex items-center gap-1">場所</span>
                 <input className="mt-1 w-full rounded border px-2 py-1" {...register(`${path}.activities.${index}.location` as const)} />
                 {activityErrors?.[index]?.location && <span className="text-[11px] text-red-600">{activityErrors[index].location.message}</span>}
               </label>
             </div>
-              <label className="mt-2 block text-xs font-medium">
-                内容
-                <textarea className="mt-1 w-full rounded border px-2 py-1" rows={2} {...register(`${path}.activities.${index}.content` as const)} />
+            <label className="mt-2 block text-xs font-medium">
+              <span className="flex items-center gap-1">内容</span>
+              <textarea className="mt-1 w-full rounded border px-2 py-1" rows={2} {...register(`${path}.activities.${index}.content` as const)} />
               {activityErrors?.[index]?.content && <span className="text-[11px] text-red-600">{activityErrors[index].content.message}</span>}
             </label>
-              <label className="mt-2 block text-xs font-medium">
-                URL
-                <input className="mt-1 w-full rounded border px-2 py-1" {...register(`${path}.activities.${index}.url` as const)} />
+            <label className="mt-2 block text-xs font-medium">
+              URL
+              <input className="mt-1 w-full rounded border px-2 py-1" {...register(`${path}.activities.${index}.url` as const)} />
               {activityErrors?.[index]?.url && <span className="text-[11px] text-red-600">{activityErrors[index].url.message}</span>}
             </label>
-              <label className="mt-2 block text-xs font-medium">
-                天気
-                <input className="mt-1 w-full rounded border px-2 py-1 uppercase" {...register(`${path}.activities.${index}.weather` as const)} />
-              {activityErrors?.[index]?.weather && <span className="text-[11px] text-red-600">{activityErrors[index].weather.message}</span>}
-            </label>
-            <div className="mt-2 flex gap-2 text-xs">
-              <button type="button" onClick={() => activitiesArray.move(index, index - 1)} disabled={index === 0} className="rounded border px-2 py-1 disabled:opacity-40">
-                上へ
-              </button>
-              <button
-                type="button"
+            <input type="hidden" {...register(`${path}.activities.${index}.weather` as const)} />
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+              <IconButton
+                icon={<ArrowIcon direction="up" />}
+                label={`このアクティビティを上へ移動`}
+                onClick={() => activitiesArray.move(index, index - 1)}
+                disabled={index === 0}
+              />
+              <IconButton
+                icon={<ArrowIcon direction="down" />}
+                label={`このアクティビティを下へ移動`}
                 onClick={() => activitiesArray.move(index, index + 1)}
                 disabled={index === activitiesArray.fields.length - 1}
-                className="rounded border px-2 py-1 disabled:opacity-40"
-              >
-                下へ
-              </button>
+              />
               <button type="button" onClick={() => activitiesArray.remove(index)} className="rounded border px-2 py-1 text-red-600">
                 削除
               </button>
@@ -445,17 +520,18 @@ function DayComparisonGrid({ slots }: { slots: ComparisonSlot[] }) {
 }
 
 function ComparisonCell({ activity, variant }: { activity?: EditorActivity; variant: DayScenario }) {
+  const tone = SCENARIO_THEME[variant];
   if (!activity) {
     return (
-      <div className="rounded border border-dashed border-slate-300 p-2 text-[11px] text-slate-400">
+      <div className={`rounded border border-dashed p-2 text-[11px] text-slate-500 ${tone.border}`}>
         {variant === "SUNNY" ? "晴天プラン未設定" : "悪天候プラン未設定"}
       </div>
     );
   }
   return (
-    <div className="space-y-1 rounded border border-slate-200 bg-white/70 p-2">
-      <p className="text-[11px] font-semibold text-slate-700">{activity.location || "場所未設定"}</p>
-      <p className="text-[11px] text-slate-600">{activity.content || "内容未設定"}</p>
+    <div className={`space-y-1 rounded border p-2 text-[11px] ${tone.border} ${tone.cellBg}`}>
+      <p className="font-semibold text-slate-800">{activity.location || "場所未設定"}</p>
+      <p className="text-slate-600">{activity.content || "内容未設定"}</p>
     </div>
   );
 }
