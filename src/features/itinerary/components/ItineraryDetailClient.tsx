@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, ApiError } from "@/shared/api/client";
+import { api, ApiError, ScenarioSelector } from "@/shared/api/client";
 import { KeyValueList } from "@/shared/ui/KeyValueList";
 import { Loading } from "@/shared/ui/Loading";
 import { SectionCard } from "@/shared/ui/SectionCard";
@@ -56,6 +57,7 @@ type Highlights = {
 
 export function ItineraryDetailClient({ id, jobId, initialItinerary }: Props) {
   const { push } = useToast();
+  const router = useRouter();
   const [itinerary, setItinerary] = useState<ItineraryFormValues | null>(() => sanitizeItinerary(initialItinerary));
   const [activeJobId, setActiveJobId] = useState<string | null>(jobId ?? null);
   const [jobState, setJobState] = useState<JobState | null>(jobId ? { status: "queued", jobId, attempts: 0, partialDays: [] } : null);
@@ -64,6 +66,7 @@ export function ItineraryDetailClient({ id, jobId, initialItinerary }: Props) {
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [pendingDays, setPendingDays] = useState<number[]>([]);
   const [highlights, setHighlights] = useState<Highlights>({ pending: [], completed: [], failed: [] });
+  const [scenarioMode, setScenarioMode] = useState<ScenarioSelector>("BOTH");
   useEffect(() => {
     setItinerary(sanitizeItinerary(initialItinerary));
   }, [initialItinerary]);
@@ -77,6 +80,7 @@ export function ItineraryDetailClient({ id, jobId, initialItinerary }: Props) {
       const latest = (await api.getItinerary(id)) as ItineraryFormValues;
       const sanitized = sanitizeItinerary(latest);
       setItinerary(sanitized);
+      router.refresh();
       return sanitized;
     } catch (err) {
       const apiErr = err as ApiError;
@@ -85,7 +89,7 @@ export function ItineraryDetailClient({ id, jobId, initialItinerary }: Props) {
     } finally {
       setIsReloading(false);
     }
-  }, [id, push]);
+  }, [id, push, router]);
 
   const dayOptions = useMemo(() => {
     if (!itinerary) return [] as { dayIndex: number; date: string }[];
@@ -194,7 +198,7 @@ export function ItineraryDetailClient({ id, jobId, initialItinerary }: Props) {
     setIsRegenerating(true);
     try {
       const sortedTargets = [...targetDays].sort((a, b) => a - b);
-      const { jobId: nextJobId } = await api.regenerateItinerary(id, sortedTargets);
+      const { jobId: nextJobId } = await api.regenerateItinerary(id, { days: sortedTargets, scenario: scenarioMode });
       setActiveJobId(nextJobId);
       setJobState({ status: "queued", jobId: nextJobId, attempts: 0, partialDays: [] });
       setPendingDays(sortedTargets);
@@ -287,6 +291,22 @@ export function ItineraryDetailClient({ id, jobId, initialItinerary }: Props) {
             <StatusLegend color="bg-emerald-500" label="成功" />
             <StatusLegend color="bg-amber-500" label="生成中" />
             <StatusLegend color="bg-red-400" label="要再生成" />
+          </div>
+          <div className="mt-3 space-y-1 text-xs text-slate-600">
+            <label className="font-semibold" htmlFor="scenario-mode">
+              天候シナリオ
+            </label>
+            <select
+              id="scenario-mode"
+              value={scenarioMode}
+              disabled={!!activeJobId || isRegenerating}
+              onChange={(event) => setScenarioMode(event.target.value as ScenarioSelector)}
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+            >
+              <option value="BOTH">晴天+悪天候を再生成</option>
+              <option value="SUNNY">晴天プランのみ再生成</option>
+              <option value="RAINY">悪天候プランのみ再生成</option>
+            </select>
           </div>
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
             {dayOptions.map((day) => (
@@ -470,11 +490,14 @@ function buildSummary(itinerary: ItineraryFormValues | null) {
   if (!itinerary) return null;
   const uniqueDays = Array.from(new Set(itinerary.days.map((day) => day.dayIndex))).length;
   const range = resolveDateRange(itinerary.days.map((day) => day.date));
+  const updatedLabel = itinerary.updatedAt ? new Date(itinerary.updatedAt).toLocaleString("ja-JP") : "未取得";
   return {
     title: itinerary.title || "無題の旅程",
     items: [
       { label: "日数", value: uniqueDays ? `${uniqueDays} 日` : "未設定", hint: "晴天/悪天候ペアは同じ日としてカウント" },
       { label: "日付", value: range ?? "日付未設定" },
+      { label: "バージョン", value: `v${itinerary.version}` },
+      { label: "最終更新", value: updatedLabel },
     ],
   };
 }
