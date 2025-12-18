@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { DayScenario, GenerationJobStatus, Prisma, Weather } from '@prisma/client';
+import { DayScenario, GenerationJobStatus, Prisma, SpotCategory, Weather } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -18,9 +18,11 @@ type RunOptions = {
 
 type NormalizedActivity = {
   time: string;
-  location: string;
-  content: string;
-  url?: string;
+  area: string;
+  placeName?: string;
+  category: SpotCategory;
+  description: string;
+  stayMinutes?: number;
   weather: Weather;
   orderIndex: number;
 };
@@ -40,9 +42,11 @@ type NormalizedDayResult = {
 
 const activitySchema = z.object({
   time: z.string().min(1),
-  location: z.string().optional(),
-  content: z.string().optional(),
-  url: z.string().url().max(500).optional().or(z.literal('')),
+  area: z.string().optional(),
+  placeName: z.string().optional(),
+  category: z.string().optional(),
+  description: z.string().optional(),
+  stayMinutes: z.coerce.number().int().min(0).max(1440).optional(),
   weather: z.string().optional(),
   orderIndex: z.coerce.number().int().min(0).optional(),
 });
@@ -131,7 +135,16 @@ export class AiPipeline {
       "date": ISO-8601 date string,
       "scenario": "SUNNY" | "RAINY",
       "activities": [
-        { "time": "HH:mm", "location": string(1-200), "content": string(1-500), "url"?: string, "weather": string, "orderIndex": number }
+        {
+          "time": "HH:mm",
+          "area": string(1-200),
+          "placeName"?: string(1-200),
+          "category": "FOOD"|"SIGHTSEEING"|"MOVE"|"REST"|"STAY"|"SHOPPING"|"OTHER",
+          "description": string(1-500),
+          "stayMinutes"?: number,
+          "weather": string,
+          "orderIndex": number
+        }
       ]
     }
   ]
@@ -147,11 +160,13 @@ export class AiPipeline {
       `Companions: ${JSON.stringify(draft.companionDetail ?? {})}`,
       `Target days: ${targetDays.length ? targetDays.join(',') : 'all'}`,
       'Output rules:',
-      '- すべての項目（title, activities.location, activities.content, weather）は自然な日本語で書く。',
+      '- すべての項目（title, activities.area, activities.description, weather）は自然な日本語で書く。',
       '- 各日・各シナリオで朝/昼/午後/夜の少なくとも4アクティビティを時系列で用意する。',
       '- time は 24時間表記 HH:mm (例: 09:30) でゼロ埋めする。',
-      '- location は具体的なスポット名を200文字以内で書く。',
-      '- content は1文で体験内容を説明し、雨天シナリオでは屋内プランにする。',
+      '- area は「札幌駅周辺」「大須商店街」のように土地勘が掴める粒度で書く。placeName は具体施設があるときだけ書く。',
+      '- category は FOOD / SIGHTSEEING / MOVE / REST / STAY / SHOPPING / OTHER のいずれかを選ぶ。',
+      '- description は体験内容を1文で説明し、雨天シナリオでは屋内プランにする。',
+      '- stayMinutes は分単位で推定を入れる（例: 60）。不明な場合は省略できる。',
       '- weather は日本語または SUNNY/RAINY のいずれかを指定し、orderIndex は0から昇順。',
       '- 同じ日付の "SUNNY" と "RAINY" は同じ時間帯セット (例: 09:00/11:30/14:30/18:00) を共有し、切り替え比較しやすくする。',
       'For each date you MUST output two entries: scenario SUN=outdoor focus ("scenario":"SUNNY") and scenario RAIN=indoor focus ("scenario":"RAINY") sharing the same dayIndex/date.',
@@ -199,6 +214,7 @@ export class AiPipeline {
     const dayMap = new Map<string, NormalizedDay>();
     let llmDayCount = 0;
     const llmDayIndexes = new Set<number>();
+
     for (const day of days) {
       const result = daySchema.safeParse(day);
       if (!result.success) continue;
@@ -225,32 +241,105 @@ export class AiPipeline {
       llmDayIndexes.add(result.data.dayIndex);
     }
 
-    context.expectedDayIndexes.forEach((dayIndex) => {
-      const date = this.normalizeDate(undefined, dayIndex, context.totalDates);
-      (['SUNNY', 'RAINY'] as DayScenario[]).forEach((scenario) => {
+    const fallbackIndexes =
+      context.expectedDayIndexes.length > 0
+        ? context.expectedDayIndexes
+        : Array.from(llmDayIndexes).sort((a, b) => a - b);
+    const lastKnownDate = context.totalDates[context.totalDates.length - 1] ?? new Date().toISOString().slice(0, 10);
+    const normalizedDays: NormalizedDay[] = [];
+
+    fallbackIndexes.forEach((dayIndex) => {
+      const date = context.totalDates[dayIndex] ?? lastKnownDate;
+      [DayScenario.SUNNY, DayScenario.RAINY].forEach((scenario) => {
         const key = `${dayIndex}-${scenario}`;
-        if (dayMap.has(key)) return;
-        const fallback = this.ensureMinimumActivities([], {
+        const existing = dayMap.get(key);
+        if (existing) {
+          normalizedDays.push(existing);
+          return;
+        }
+        const fallbackActivities = this.ensureMinimumActivities([], {
           scenario,
           dayIndex,
           date,
           draft: context.draft,
         });
-        dayMap.set(key, { dayIndex, date, scenario, activities: fallback });
+        normalizedDays.push({ dayIndex, date, scenario, activities: fallbackActivities });
       });
     });
 
     return {
-      days: Array.from(dayMap.values()).sort((a, b) => {
-      if (a.dayIndex === b.dayIndex) {
-        if (a.scenario === b.scenario) return 0;
-        return a.scenario === DayScenario.SUNNY ? -1 : 1;
-      }
-      return a.dayIndex - b.dayIndex;
-      }),
+      days: normalizedDays,
       llmDayCount,
       llmDayIndexes: Array.from(llmDayIndexes),
     };
+  }
+
+  private normalizeArea(
+    value: string | undefined,
+    context: { scenario: DayScenario; dayIndex: number; draft: DraftWithCompanion },
+    idx: number,
+  ) {
+    if (value && value.trim().length) {
+      return value.trim().slice(0, 200);
+    }
+    const base = this.resolvePrimaryDestination(context.draft, context.dayIndex);
+    const label = context.scenario === DayScenario.SUNNY ? '周辺エリア' : '屋内エリア';
+    return `${base}${label}${idx + 1}`;
+  }
+
+  private normalizePlaceName(value?: string) {
+    if (!value) return undefined;
+    const trimmed = value.trim();
+    return trimmed.length ? trimmed.slice(0, 200) : undefined;
+  }
+
+  private normalizeCategoryField(value?: string) {
+    if (!value) return SpotCategory.SIGHTSEEING;
+    const upper = value.trim().toUpperCase();
+    if ((Object.keys(SpotCategory) as Array<keyof typeof SpotCategory>).includes(upper as keyof typeof SpotCategory)) {
+      return SpotCategory[upper as keyof typeof SpotCategory];
+    }
+    switch (upper) {
+      case 'EAT':
+      case 'FOODS':
+      case 'DINING':
+        return SpotCategory.FOOD;
+      case 'MOVE':
+      case 'TRANSIT':
+        return SpotCategory.MOVE;
+      case 'REST':
+      case 'BREAK':
+        return SpotCategory.REST;
+      case 'STAY':
+      case 'HOTEL':
+        return SpotCategory.STAY;
+      case 'SHOP':
+      case 'SHOPPING':
+        return SpotCategory.SHOPPING;
+      case 'SIGHT':
+      case 'SIGHTSEEING':
+        return SpotCategory.SIGHTSEEING;
+      default:
+        return SpotCategory.OTHER;
+    }
+  }
+
+  private normalizeDescription(
+    value: string | undefined,
+    context: { scenario: DayScenario; dayIndex: number; draft: DraftWithCompanion },
+    idx: number,
+  ) {
+    if (value && value.trim().length) {
+      return value.trim().slice(0, 500);
+    }
+    const scenarioLabel = context.scenario === DayScenario.SUNNY ? '屋外' : '屋内';
+    return `${this.resolvePrimaryDestination(context.draft, context.dayIndex)}で${scenarioLabel}の体験を楽しみます (${idx + 1}件目)`;
+  }
+
+  private normalizeStayMinutes(value?: number) {
+    if (!Number.isFinite(value)) return undefined;
+    const clamped = Math.max(5, Math.min(Number(value), 1440));
+    return clamped;
   }
 
   private normalizeActivities(
@@ -265,13 +354,15 @@ export class AiPipeline {
 
       const data = candidate.data;
       const time = this.normalizeTime(data.time, idx);
-      const location = this.normalizeLocation(data.location, context, idx);
-      const content = this.normalizeContent(data.content, context, idx);
-      const url = data.url && data.url.trim().length ? data.url.trim() : undefined;
+      const area = this.normalizeArea(data.area, context, idx);
+      const placeName = this.normalizePlaceName(data.placeName);
+      const category = this.normalizeCategoryField(data.category);
+      const description = this.normalizeDescription(data.description, context, idx);
+      const stayMinutes = this.normalizeStayMinutes(data.stayMinutes);
       const weather = this.normalizeWeatherField(data.weather, context.scenario);
       const orderIndex = Number.isFinite(data.orderIndex) ? Number(data.orderIndex) : normalized.length;
 
-      normalized.push({ time, location, content, url, weather, orderIndex });
+      normalized.push({ time, area, placeName, category, description, stayMinutes, weather, orderIndex });
     });
     return normalized;
   }
@@ -327,26 +418,39 @@ export class AiPipeline {
     const dayLabel = `Day ${context.dayIndex + 1}`;
     const scenarioLabel = context.scenario === DayScenario.SUNNY ? '屋外' : '屋内';
     const weather = context.scenario === DayScenario.SUNNY ? Weather.SUNNY : Weather.RAINY;
+    const baseArea = `${baseDestination}周辺`;
     const templates = [
       {
         time: DEFAULT_TIME_SLOTS[0],
-        location: `${baseDestination} 朝の散策`,
-        content: `${dayLabel}は${scenarioLabel}でゆったりスタート。街歩きで雰囲気を感じます。`,
+        area: baseArea,
+        placeName: `${baseDestination}の朝散策`,
+        category: SpotCategory.SIGHTSEEING,
+        description: `${dayLabel}は${scenarioLabel}でゆったりスタート。街歩きで雰囲気を感じます。`,
+        stayMinutes: 60,
       },
       {
         time: DEFAULT_TIME_SLOTS[1],
-        location: `${baseDestination} ローカルカフェ`,
-        content: `${baseDestination}の名物を味わいながら昼食と休憩を取ります。`,
+        area: baseArea,
+        placeName: `${baseDestination}の人気カフェ`,
+        category: SpotCategory.FOOD,
+        description: `${baseDestination}の名物を味わいながら昼食と休憩を取ります。`,
+        stayMinutes: 75,
       },
       {
         time: DEFAULT_TIME_SLOTS[2],
-        location: `${baseDestination} 文化体験`,
-        content: `${scenarioLabel}プランで午後の観光スポットを訪れ、歴史や文化を学びます。`,
+        area: baseArea,
+        placeName: `${baseDestination}文化体験`,
+        category: SpotCategory.SIGHTSEEING,
+        description: `${scenarioLabel}プランで午後の観光スポットを訪れ、歴史や文化を学びます。`,
+        stayMinutes: 90,
       },
       {
         time: DEFAULT_TIME_SLOTS[3],
-        location: `${baseDestination} ディナー`,
-        content: `${baseDestination}のおすすめ料理と夜の雰囲気を楽しみ、1日を締めくくります。`,
+        area: baseArea,
+        placeName: `${baseDestination}ディナー`,
+        category: SpotCategory.FOOD,
+        description: `${baseDestination}のおすすめ料理と夜の雰囲気を楽しみ、1日を締めくくります。`,
+        stayMinutes: 90,
       },
     ];
 
@@ -384,30 +488,6 @@ export class AiPipeline {
     }
 
     return fallback;
-  }
-
-  private normalizeLocation(value: string | undefined, context: { scenario: DayScenario; dayIndex: number; draft: DraftWithCompanion }, idx: number) {
-    if (value && value.trim().length) {
-      return value.trim().slice(0, 200);
-    }
-    const base = this.resolvePrimaryDestination(context.draft, context.dayIndex);
-    const suffix = context.scenario === DayScenario.SUNNY ? '屋外スポット' : '屋内スポット';
-    return `${base}の${suffix}${idx + 1}`;
-  }
-
-  private normalizeContent(value: string | undefined, context: { scenario: DayScenario; dayIndex: number; draft: DraftWithCompanion }, idx: number) {
-    if (value && value.trim().length) {
-      return value.trim().slice(0, 500);
-    }
-    const base = this.resolvePrimaryDestination(context.draft, context.dayIndex);
-    const scenarioText = context.scenario === DayScenario.SUNNY ? '屋外で' : '屋内で';
-    const templates = [
-      `${base}で${scenarioText}朝の空気を楽しみながらウォームアップします。`,
-      `${base}の名物ランチをゆっくり味わいます。`,
-      `${base}ならではの文化・体験スポットを巡って午後を過ごします。`,
-      `${base}の夜景や食体験で1日を締めくくります。`,
-    ];
-    return templates[Math.min(idx, templates.length - 1)];
   }
 
   private normalizeWeatherField(value: string | undefined, scenario: DayScenario): Weather {

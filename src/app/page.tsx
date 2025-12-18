@@ -4,7 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { FormProvider, useFieldArray, useForm, useFormContext, useWatch } from "react-hook-form";
+import { FormProvider, useForm, useFormContext } from "react-hook-form";
 import type { FieldPath } from "react-hook-form";
 import { api, ApiError } from "@/shared/api/client";
 import { draftFormSchema, DraftFormValues } from "@/shared/validation/draft.schema";
@@ -68,8 +68,29 @@ export default function Home() {
     mode: "onBlur",
   });
 
-  const destArray = useFieldArray({ control: form.control, name: "destinations" });
-  const purposesArray = useFieldArray({ control: form.control, name: "purposes" });
+  const destinations = form.watch("destinations") ?? [];
+  const purposes = form.watch("purposes") ?? [];
+
+  const appendDestination = () => {
+    form.setValue("destinations", [...destinations, ""], { shouldDirty: true });
+  };
+  const removeDestination = (index: number) => {
+    form.setValue(
+      "destinations",
+      destinations.filter((_, idx) => idx !== index),
+      { shouldDirty: true },
+    );
+  };
+  const appendPurpose = () => {
+    form.setValue("purposes", [...purposes, ""], { shouldDirty: true });
+  };
+  const removePurpose = (index: number) => {
+    form.setValue(
+      "purposes",
+      purposes.filter((_, idx) => idx !== index),
+      { shouldDirty: true },
+    );
+  };
   const isSubmitting = form.formState.isSubmitting;
 
   const onSubmit = form.handleSubmit(async (values) => {
@@ -93,8 +114,8 @@ export default function Home() {
     scrollToFirstError(form.formState.errors);
   });
 
-  const disableAddDestination = useMemo(() => destArray.fields.length >= 5, [destArray.fields.length]);
-  const disableAddPurpose = useMemo(() => purposesArray.fields.length >= 5, [purposesArray.fields.length]);
+  const disableAddDestination = useMemo(() => destinations.length >= 5, [destinations.length]);
+  const disableAddPurpose = useMemo(() => purposes.length >= 5, [purposes.length]);
 
   const persistToken = (token: string) => {
     // Why: CSRではlocalStorage、SSRの一覧ではCookie経由で同じトークンを参照するため両方に保存。
@@ -180,11 +201,11 @@ export default function Home() {
                     <p className="text-sm font-semibold text-slate-900">目的地（最大5件）</p>
                     <div className="flex flex-wrap items-center gap-2 text-xs">
                       <StatusBadge tone={disableAddDestination ? "warning" : "neutral"}>
-                        残り {Math.max(0, 5 - destArray.fields.length)} 件
+                        残り {Math.max(0, 5 - destinations.length)} 件
                       </StatusBadge>
                       <button
                         type="button"
-                        onClick={() => destArray.append("")}
+                        onClick={appendDestination}
                         disabled={disableAddDestination}
                         className="rounded-full border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                       >
@@ -198,9 +219,9 @@ export default function Home() {
                   </div>
                   <p className="text-xs text-slate-500">主要な都市や立ち寄りたいエリアを優先順で入力してください。</p>
                   <div className="space-y-3">
-                    {destArray.fields.map((field, index) => (
+                    {destinations.map((_, index) => (
                       <Field
-                        key={field.id}
+                        key={`destination-${index}`}
                         label={`目的地 ${index + 1}`}
                         name={`destination-${index}`}
                         description={index === 0 ? "最初の目的地を入力してください。具体的なスポット名でも構いません。" : undefined}
@@ -218,7 +239,7 @@ export default function Home() {
                           <button
                             type="button"
                             aria-label={`目的地 ${index + 1}を削除`}
-                            onClick={() => destArray.remove(index)}
+                            onClick={() => removeDestination(index)}
                             className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:border-red-200 hover:text-red-600"
                           >
                             削除
@@ -289,11 +310,11 @@ export default function Home() {
                     <p className="text-sm font-semibold text-slate-900">旅行目的（最大5件）</p>
                     <div className="flex flex-wrap items-center gap-2 text-xs">
                       <StatusBadge tone={disableAddPurpose ? "warning" : "neutral"}>
-                        残り {Math.max(0, 5 - purposesArray.fields.length)} 件
+                        残り {Math.max(0, 5 - purposes.length)} 件
                       </StatusBadge>
                       <button
                         type="button"
-                        onClick={() => purposesArray.append("")}
+                        onClick={appendPurpose}
                         disabled={disableAddPurpose}
                         className="rounded-full border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                       >
@@ -307,9 +328,9 @@ export default function Home() {
                   </div>
                   <p className="text-xs text-slate-500">例: 家族旅行 / グルメ / リモートワーク / アクティビティ重視 など</p>
                   <div className="space-y-3">
-                    {purposesArray.fields.map((field, index) => (
+                    {purposes.map((_, index) => (
                       <Field
-                        key={field.id}
+                        key={`purpose-${index}`}
                         label={`目的 ${index + 1}`}
                         name={`purpose-${index}`}
                         error={form.formState.errors.purposes?.[index]?.message as string | undefined}
@@ -326,7 +347,7 @@ export default function Home() {
                           <button
                             type="button"
                             aria-label={`目的 ${index + 1}を削除`}
-                            onClick={() => purposesArray.remove(index)}
+                            onClick={() => removePurpose(index)}
                             className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:border-red-200 hover:text-red-600"
                           >
                             削除
@@ -477,8 +498,9 @@ type FieldProps = {
 
 function Field({ label, name, children, error, description, helperId, required = true, formPath }: FieldProps) {
   const formContext = useFormContext<DraftFormValues>();
-  const watchedValue = useWatch({ control: formContext.control, name: formPath });
+  const watchedValue = formPath ? formContext.watch(formPath) : undefined;
   const isFilled = (() => {
+    if (!formPath) return false;
     if (watchedValue === undefined || watchedValue === null) return false;
     if (typeof watchedValue === "string") return watchedValue.trim().length > 0;
     if (typeof watchedValue === "number") return true;

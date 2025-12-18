@@ -43,7 +43,7 @@ describe('AiPipeline retry flow', () => {
     const provider = {
       generate: jest.fn(async () => ({
         rawText:
-          '```json{"title":"trip","days":[{"dayIndex":0,"date":"2025-01-01","scenario":"SUNNY","activities":[{"time":"09:00","location":"A","content":"B","weather":"SUN","orderIndex":0}]}]} ```',
+          '```json{"title":"trip","days":[{"dayIndex":0,"date":"2025-01-01","scenario":"SUNNY","activities":[{"time":"09:00","area":"名古屋駅周辺","placeName":"A","category":"FOOD","description":"B","stayMinutes":60,"weather":"SUN","orderIndex":0}]}]} ```',
         rawResponse: {},
         request: {},
       })),

@@ -30,8 +30,11 @@ export class GeminiProvider {
             activities: [
               {
                 time: '09:00',
-                location: 'Test Location',
-                content: `Generated from prompt hash ${prompt.slice(0, 16)}`,
+                area: 'テスト市中心部',
+                placeName: 'テストモーニングスポット',
+                category: 'SIGHTSEEING',
+                description: `Generated from prompt hash ${prompt.slice(0, 16)}`,
+                stayMinutes: 90,
                 weather: 'SUNNY',
                 orderIndex: 0,
               },
@@ -44,8 +47,11 @@ export class GeminiProvider {
             activities: [
               {
                 time: '13:00',
-                location: 'Indoor Venue',
-                content: 'Alternative plan for bad weather',
+                area: '駅前エリア',
+                placeName: 'インドアギャラリー',
+                category: 'OTHER',
+                description: 'Alternative plan for bad weather',
+                stayMinutes: 60,
                 weather: 'RAINY',
                 orderIndex: 0,
               },

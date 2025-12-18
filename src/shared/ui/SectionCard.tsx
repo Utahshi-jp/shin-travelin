@@ -8,7 +8,8 @@ type SectionCardProps = {
   tone?: "default" | "muted" | "brand";
   className?: string;
   as?: "section" | "div" | "fieldset" | "form";
-} & Pick<ComponentPropsWithoutRef<"section">, "id" | "aria-labelledby">;
+  method?: ComponentPropsWithoutRef<"form">["method"];
+} & Pick<ComponentPropsWithoutRef<"section">, "id" | "aria-labelledby" | "aria-label">;
 
 const toneClass: Record<NonNullable<SectionCardProps["tone"]>, string> = {
   default: "border-slate-200 bg-white",

@@ -1,5 +1,5 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { DayScenario, GenerationJobStatus, Prisma, Weather } from '@prisma/client';
+import { DayScenario, GenerationJobStatus, Prisma, SpotCategory, Weather } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ErrorCode } from '../shared/error-codes';
@@ -51,7 +51,14 @@ export class ItinerariesService {
           version: true,
           createdAt: true,
           draft: { select: { purposes: true } },
-          days: { select: { date: true, scenario: true }, orderBy: [{ dayIndex: 'asc' }, { scenario: 'asc' }] },
+          days: {
+            select: {
+              date: true,
+              scenario: true,
+              activities: { select: { area: true, description: true }, orderBy: { orderIndex: 'asc' } },
+            },
+            orderBy: [{ dayIndex: 'asc' }, { scenario: 'asc' }],
+          },
         },
       }),
       this.prisma.itinerary.count({ where }),
@@ -62,6 +69,9 @@ export class ItinerariesService {
       const primary = sunnyDays.length ? sunnyDays : itinerary.days;
       const firstDate = primary.length ? primary[0].date.toISOString() : null;
       const lastDate = primary.length ? primary[primary.length - 1].date.toISOString() : null;
+      const activities = itinerary.days.flatMap((day) => day.activities ?? []);
+      const areaRanking = buildAreaRanking(activities.map((activity) => activity.area));
+      const summary = buildDescriptionSummary(activities.map((activity) => activity.description));
       return {
         id: itinerary.id,
         title: itinerary.title,
@@ -70,6 +80,8 @@ export class ItinerariesService {
         firstDate,
         lastDate,
         purposes: itinerary.draft?.purposes ?? [],
+        primaryAreas: areaRanking,
+        experienceSummary: summary,
       };
     });
 
@@ -126,9 +138,11 @@ export class ItinerariesService {
             data: day.activities.map((activity, idx) => ({
               itineraryDayId: dayRow.id,
               time: activity.time,
-              location: activity.location,
-              content: activity.content,
-              url: activity.url,
+              area: activity.area,
+              placeName: activity.placeName ?? null,
+              category: (activity.category as SpotCategory) ?? SpotCategory.SIGHTSEEING,
+              description: activity.description,
+              stayMinutes: activity.stayMinutes ?? null,
               weather: (activity.weather ?? 'UNKNOWN') as Weather,
               orderIndex: Number.isFinite(activity.orderIndex) ? activity.orderIndex : idx,
             })),
@@ -185,4 +199,26 @@ export class ItinerariesService {
       createdAt: itinerary.createdAt,
     };
   }
+}
+
+function buildAreaRanking(areas: string[], limit = 3) {
+  const counter = new Map<string, number>();
+  areas
+    .map((area) => area?.trim())
+    .filter((area): area is string => Boolean(area))
+    .forEach((area) => {
+      counter.set(area, (counter.get(area) ?? 0) + 1);
+    });
+  return Array.from(counter.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([area]) => area);
+}
+
+function buildDescriptionSummary(descriptions: string[], limit = 2) {
+  const filtered = descriptions
+    .map((desc) => desc?.trim())
+    .filter((desc): desc is string => Boolean(desc));
+  if (!filtered.length) return null;
+  return filtered.slice(0, limit).join('｜');
 }

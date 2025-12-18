@@ -14,6 +14,26 @@ import { ItineraryEditor } from "./ItineraryEditor";
 const POLL_SCHEDULE_MS = [2000, 4000, 8000];
 const POLL_TIMEOUT_MS = 120_000;
 
+const CATEGORY_LABELS: Record<string, string> = {
+  FOOD: "グルメ",
+  SIGHTSEEING: "観光",
+  MOVE: "移動",
+  REST: "休憩",
+  STAY: "宿泊",
+  SHOPPING: "買い物",
+  OTHER: "その他",
+};
+
+const CATEGORY_BADGES: Record<string, string> = {
+  FOOD: "border-rose-200 bg-rose-50 text-rose-700",
+  SIGHTSEEING: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  MOVE: "border-slate-200 bg-slate-50 text-slate-600",
+  REST: "border-amber-200 bg-amber-50 text-amber-800",
+  STAY: "border-indigo-200 bg-indigo-50 text-indigo-700",
+  SHOPPING: "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700",
+  OTHER: "border-gray-200 bg-gray-50 text-gray-600",
+};
+
 type Props = {
   id: string;
   jobId?: string;
@@ -406,10 +426,18 @@ function ScenarioCell({ activity, emptyLabel }: { activity?: ScenarioMatrixActiv
   if (!activity) {
     return <p className="text-xs text-slate-400">{emptyLabel}</p>;
   }
+  const badgeClass = resolveCategoryBadge(activity.category);
   return (
-    <div className="space-y-1 text-xs text-slate-700">
-      <p className="font-semibold text-slate-800">{activity.location || "場所未設定"}</p>
-      <p>{activity.content || "内容未設定"}</p>
+    <div className="rounded-2xl border border-slate-100 bg-white/70 p-3 text-xs shadow-sm">
+      <p className="text-sm font-semibold text-slate-900">{activity.area || "エリア未設定"}</p>
+      <div className="mt-1 flex flex-wrap items-center gap-2">
+        <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-semibold ${badgeClass}`}>
+          {CATEGORY_LABELS[activity.category ?? "OTHER"] ?? "その他"}
+        </span>
+        {activity.placeName && <span className="text-[11px] text-slate-600">{activity.placeName}</span>}
+        {activity.stayMinutes ? <span className="text-[11px] text-slate-500">{formatStayDuration(activity.stayMinutes)}</span> : null}
+      </div>
+      <p className="mt-1 text-slate-600">{activity.description || "内容未設定"}</p>
     </div>
   );
 }
@@ -421,6 +449,21 @@ function StatusLegend({ color, label }: { color: string; label: string }) {
       {label}
     </span>
   );
+}
+
+function resolveCategoryBadge(category?: string | null) {
+  if (!category) return CATEGORY_BADGES.OTHER;
+  return CATEGORY_BADGES[category] ?? CATEGORY_BADGES.OTHER;
+}
+
+function formatStayDuration(minutes?: number | null) {
+  if (!minutes || minutes <= 0) return "";
+  if (minutes < 60) return `${minutes}分滞在`;
+  const hours = minutes / 60;
+  if (Number.isInteger(hours)) {
+    return `${hours}時間滞在`;
+  }
+  return `約${minutes}分滞在`;
 }
 
 function buildSummary(itinerary: ItineraryFormValues | null) {
@@ -532,9 +575,11 @@ function sanitizeItinerary(itinerary: ItineraryFormValues | null): ItineraryForm
       activities: (day.activities ?? []).map((activity) => ({
         ...activity,
         time: normalizeTimeField(activity.time),
-        location: activity.location ?? "",
-        content: activity.content ?? "",
-        url: activity.url ?? "",
+        area: activity.area ?? "",
+        placeName: activity.placeName ?? "",
+        category: activity.category ?? "SIGHTSEEING",
+        description: activity.description ?? "",
+        stayMinutes: normalizeStayMinutesField(activity.stayMinutes),
         weather: activity.weather ?? "UNKNOWN",
       })),
     })),
@@ -564,6 +609,12 @@ function normalizeDateField(value?: string) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return new Date().toISOString().slice(0, 10);
   return parsed.toISOString().slice(0, 10);
+}
+
+function normalizeStayMinutesField(value?: number | null) {
+  if (!Number.isFinite(value ?? NaN)) return undefined;
+  const clamped = Math.max(5, Math.min(Number(value), 1440));
+  return clamped;
 }
 
 function clamp(value: number, min: number, max: number) {

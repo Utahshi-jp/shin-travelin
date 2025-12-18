@@ -8,7 +8,7 @@ export const draftFormSchema = z
     startDate: z.string().min(1, "開始日を入力してください"),
     endDate: z.string().min(1, "終了日を入力してください"),
     budget: z
-      .number({ invalid_type_error: "数値で入力してください" })
+      .number()
       .min(5000, "最低5,000円") // 極端に低い予算での生成を防ぐ。
       .max(5_000_000, "上限は5,000,000円"), // 上限はAPI側の計算負荷を抑制。
     purposes: z.array(z.string().min(1, "1文字以上")).min(1, "1件以上").max(5, "5件まで"),

@@ -34,6 +34,16 @@ enum DayScenario {
   RAINY
 }
 
+enum SpotCategory {
+  FOOD
+  SIGHTSEEING
+  MOVE
+  REST
+  STAY
+  SHOPPING
+  OTHER
+}
+
 /// User accounts; owns Drafts and Itineraries (requirements FR/AR auth baseline).
 model User {
   id           String   @id @default(uuid())
@@ -188,9 +198,11 @@ model Activity {
   id             String       @id @default(uuid())
   itineraryDayId String
   time           String
-  location       String
-  content        String
-  url            String?
+  area           String
+  placeName      String?
+  category       SpotCategory @default(SIGHTSEEING)
+  description    String
+  stayMinutes    Int?
   weather        Weather
   orderIndex     Int
   createdAt      DateTime     @default(now())

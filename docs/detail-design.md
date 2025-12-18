@@ -210,7 +210,7 @@
 #### 表示
 - タイトル
 - 日付一覧
-- Activities（時刻 / 場所 / 内容 / URL（任意） / 天気 enum）
+- Activities（時刻 / エリア / 任意スポット名 / カテゴリ / 説明 / 滞在目安 / 天気 enum）
 
 #### 編集
 - タイトル編集
@@ -332,7 +332,7 @@
   - `Day`
     - `{ date: ISO8601, activities: Activity[] }`
   - `Activity`
-    - `{ time: HH:mm, location(1–200), content(1–500), url?: URL, weather: enum }`
+    - `{ time: HH:mm, area(1–200), placeName?: string(<=200), category: SpotCategory, description(1–500), stayMinutes?: number(5–1440), weather: enum }`
 - **前提**
   - 指定した `jobId` の status が `succeeded`
 - **出力**
@@ -488,14 +488,34 @@ LLM 呼び出しの **完全監査ログ**。削除禁止。
 - `id` : UUID（PK）
 - `itineraryDayId` : UUID（FK → itinerary_days.id）
 - `time` : string（HH:mm）
-- `location` : string
-- `content` : string
-- `url` : string?（nullable）
+- `area` : string（200 文字以内）
+- `placeName` : string?（nullable, 200 文字以内）
+- `category` : SpotCategory enum（FOOD / SIGHTSEEING / MOVE / REST / STAY / SHOPPING / OTHER）
+- `description` : string（500 文字以内）
+- `stayMinutes` : int?（nullable, 5–1440 分）
 - `weather` : enum
 - `orderIndex` : int
 
 制約：
 - `(itineraryDayId, orderIndex)` を **ユニーク**
+
+---
+
+#### 4.8.1 2025-12 Spot モデル刷新（URL 廃止）
+
+- **背景**: 旧 `location/url/content` では AI 応答の揺らぎが大きく、URL の死活監視コストや位置情報欠損が発生していた。旅行者が把握したいのは「どのエリアで何をするか」「滞在時間はどれくらいか」であり、URL は MVP 以降に safely augment すべきと判断した。
+- **新フィールド**:
+  - `area` … 土地勘が伝わる粒度（例: 「大通公園周辺」「なんばエリア」）
+  - `placeName?` … 具体施設がある場合のみ設定（任意）
+  - `category` … SpotCategory（FOOD / SIGHTSEEING / MOVE / REST / STAY / SHOPPING / OTHER）
+  - `description` … 体験内容 1 文 / 500 文字以内
+  - `stayMinutes?` … 5–1440 分の範囲で滞在目安（任意）
+- **移行手順**:
+  1. Prisma schema を更新し `SpotCategory` を導入、`location/url/content` を置換した migration（`20251217090000_refactor_activity_spots`）を適用する。
+  2. NestJS DTO / `persistItineraryGraph` / `itineraries.service` / `ai.pipeline` 正規化ロジックを新フィールドへ差し替える（URL 参照は全削除）。
+  3. AI プロンプトとモックプロバイダ（GeminiProvider）を area/placeName/category/stayMinutes を出力するよう更新し、既存のユニットテスト（`generation.flow.spec.ts`）のフィクスチャを再生成する。
+  4. フロントエンド（一覧 / 詳細 / 印刷 / RHF schema）を area/placeName/category/description/stayMinutes に合わせて UI を再設計し、URL 入力欄を完全撤去する。
+- **補足**: URL が必要になった場合は別テーブル（`activity_links`）で任意に紐づけ、AI からの取得ではなく運営側ハンドブックに寄せる方針とする。
 
 ---
 
@@ -555,9 +575,11 @@ await this.prisma.$transaction(async (tx) => {
       data: day.activities.map((a, orderIndex) => ({
         itineraryDayId: dayRow.id,
         time: a.time,
-        location: a.location,
-        content: a.content,
-        url: a.url,
+        area: a.area,
+        placeName: a.placeName ?? null,
+        category: a.category,
+        description: a.description,
+        stayMinutes: a.stayMinutes ?? null,
         weather: a.weather,
         orderIndex,
       })),
@@ -875,9 +897,11 @@ await this.prisma.$transaction(async (tx) => {
 ### Activity
 - **属性**
   - `time`
-  - `location`
-  - `content`
-  - `url?`
+  - `area`
+  - `placeName?`
+  - `category`
+  - `description`
+  - `stayMinutes?`
   - `weather`（enum）
   - `orderIndex`
 - **責務**
@@ -1050,40 +1074,50 @@ await this.prisma.$transaction(async (tx) => {
 2. 突然の天候変化に備え、晴天 / 悪天候で目的地は可能な限り近接させる。
 3. 旅行開始地点は {{origin}}、目的地は {{destinations}} から選ぶ。開始日は {{startDate}}、終了日は {{endDate}}。
 4. 予算は {{budget}} 円、目的は {{purposes}}、同行者は 成人男 {{adultMale}} 人、成人女 {{adultFemale}} 人、男児 {{boy}} 人、女児 {{girl}} 人、幼児 {{infant}} 人、ペット {{pet}} 匹、その他条件「{{notes}}」。
-5. すべての location では具体的な施設名を出し、url にはその公式サイトのトップページを記載する。
+5. 各 activity には `area`（土地勘が伝わる 1–200 文字）、任意の `placeName`、`category`（FOOD/SIGHTSEEING/MOVE/REST/STAY/SHOPPING/OTHER）、`description`（1 文 / 500 文字以内）、`stayMinutes`（5–1440）を含め、URL は書かない。
 6. 出力は次の JSON 形式のみ（余計な文章は不要）：
 
 {
   "title": "〇〇旅行スケジュール",
   "days": [
     {
-      "date": "1日目(x月y日)",
-      "weather": "sunny",
-      "schedule": [
+      "dayIndex": 0,
+      "date": "2025-05-01",
+      "scenario": "SUNNY",
+      "activities": [
         {
-          "time": "9:00",
-          "activity": "新幹線で〇〇駅到着",
-          "location": "〇〇駅",
-          "url": "https://..."
+          "time": "09:00",
+          "area": "〇〇駅周辺",
+          "placeName": "〇〇神社",
+          "category": "SIGHTSEEING",
+          "description": "参拝と散策で朝の雰囲気を楽しむ",
+          "stayMinutes": 60,
+          "weather": "SUNNY",
+          "orderIndex": 0
         }
       ]
     },
     {
-      "date": "1日目(x月y日)",
-      "weather": "rainy",
-      "schedule": [
+      "dayIndex": 0,
+      "date": "2025-05-01",
+      "scenario": "RAINY",
+      "activities": [
         {
-          "time": "9:00",
-          "activity": "新幹線で〇〇駅到着",
-          "location": "〇〇駅",
-          "url": "https://..."
+          "time": "09:00",
+          "area": "駅前屋内モール",
+          "placeName": "〇〇ミュージアム",
+          "category": "OTHER",
+          "description": "屋内展示で天候を気にせず文化体験",
+          "stayMinutes": 75,
+          "weather": "RAINY",
+          "orderIndex": 0
         }
       ]
     }
   ]
 }
 
-- legacy questionBuilder の要求（公式サイト URL、晴雨ペア、近接条件）を踏襲しつつ、JSON として処理しやすい形式に寄せる。
+- 晴雨ペアと近接条件は従来通り維持しつつ、URL ではなくエリア粒度＋カテゴリで比較しやすい JSON に寄せる。
 
 ---
 

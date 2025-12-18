@@ -50,7 +50,7 @@ describe('AI schedule generation flow', () => {
   const geminiMock = {
     generate: jest.fn(async () => ({
       rawText:
-        '{"title":"Trip","days":[{"dayIndex":0,"date":"2025-01-10","scenario":"SUNNY","activities":[{"time":"09:00","location":"Kiyomizu","content":"Visit temple","weather":"SUNNY","orderIndex":0}]}]}',
+        '{"title":"Trip","days":[{"dayIndex":0,"date":"2025-01-10","scenario":"SUNNY","activities":[{"time":"09:00","area":"東山エリア","placeName":"清水寺","category":"SIGHTSEEING","description":"Visit temple","stayMinutes":90,"weather":"SUNNY","orderIndex":0}]}]}',
       rawResponse: {},
       request: { mock: true },
     })),
@@ -78,7 +78,7 @@ describe('AI schedule generation flow', () => {
       generate: jest.fn(async () => ({
         // Missing closing brackets; jsonrepair should fix.
         rawText:
-          '{"title":"Trip","days":[{"dayIndex":0,"date":"2025-01-10","scenario":"SUNNY","activities":[{"time":"09:00","location":"Kiyomizu","content":"Visit temple","weather":"SUNNY","orderIndex":0}]',
+          '{"title":"Trip","days":[{"dayIndex":0,"date":"2025-01-10","scenario":"SUNNY","activities":[{"time":"09:00","area":"東山エリア","placeName":"清水寺","category":"SIGHTSEEING","description":"Visit temple","stayMinutes":90,"weather":"SUNNY","orderIndex":0}]',
         rawResponse: {},
         request: { mock: true },
       })),

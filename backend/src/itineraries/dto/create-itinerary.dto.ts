@@ -1,5 +1,35 @@
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsDateString, IsEnum, IsInt, IsOptional, IsString, IsUUID, Length, Matches, MaxLength, Min, ValidateNested } from 'class-validator';
+import {
+  ArrayMinSize,
+  IsArray,
+  IsDateString,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+
+export enum ActivityCategoryValue {
+  FOOD = 'FOOD',
+  SIGHTSEEING = 'SIGHTSEEING',
+  MOVE = 'MOVE',
+  REST = 'REST',
+  STAY = 'STAY',
+  SHOPPING = 'SHOPPING',
+  OTHER = 'OTHER',
+}
+
+export enum DayScenarioValue {
+  SUNNY = 'SUNNY',
+  RAINY = 'RAINY',
+}
 
 class ActivityDto {
   @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: 'time must be HH:mm' })
@@ -7,16 +37,25 @@ class ActivityDto {
 
   @IsString()
   @Length(1, 200)
-  location!: string;
-
-  @IsString()
-  @Length(1, 500)
-  content!: string;
+  area!: string;
 
   @IsOptional()
   @IsString()
-  @MaxLength(500)
-  url?: string;
+  @Length(1, 200)
+  placeName?: string;
+
+  @IsEnum(ActivityCategoryValue)
+  category!: ActivityCategoryValue;
+
+  @IsString()
+  @Length(1, 500)
+  description!: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(5)
+  @Max(1440)
+  stayMinutes?: number;
 
   @IsString()
   @Length(3, 20)
@@ -25,11 +64,6 @@ class ActivityDto {
   @IsInt()
   @Min(0)
   orderIndex!: number;
-}
-
-export enum DayScenarioValue {
-  SUNNY = 'SUNNY',
-  RAINY = 'RAINY',
 }
 
 class DayDto {

@@ -5,7 +5,7 @@ import { createContext, ReactNode, useCallback, useContext, useMemo, useState } 
 export type Toast = {
   id: string;
   message: string;
-  variant?: "info" | "error";
+  variant?: "info" | "error" | "success";
   correlationId?: string;
 };
 
@@ -53,7 +53,7 @@ function ToastViewport({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id:
       {toasts.map((toast) => (
         <div
           key={toast.id}
-          className={`rounded border px-3 py-2 text-sm shadow ${toast.variant === "error" ? "border-red-300 bg-red-50" : "border-slate-200 bg-white"}`}
+          className={`rounded border px-3 py-2 text-sm shadow ${toast.variant === "error" ? "border-red-300 bg-red-50" : toast.variant === "success" ? "border-emerald-300 bg-emerald-50" : "border-slate-200 bg-white"}`}
           role="status"
           aria-live="polite"
         >
