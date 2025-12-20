@@ -1,4 +1,9 @@
-import { ForbiddenException, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ErrorCode } from '../shared/error-codes';
 import { CreateDraftDto } from './dto/create-draft.dto';
@@ -14,7 +19,10 @@ export class DraftsService {
     const start = new Date(dto.startDate);
     const end = new Date(dto.endDate);
     if (start > end) {
-      throw new BadRequestException({ code: ErrorCode.VALIDATION_ERROR, message: 'startDate must be <= endDate' });
+      throw new BadRequestException({
+        code: ErrorCode.VALIDATION_ERROR,
+        message: 'startDate must be <= endDate',
+      });
     }
 
     const draft = await this.prisma.$transaction(async (tx) => {
@@ -51,12 +59,21 @@ export class DraftsService {
   }
 
   async getById(id: string, userId: string) {
-    const draft = await this.prisma.draft.findUnique({ include: { companionDetail: true }, where: { id } });
+    const draft = await this.prisma.draft.findUnique({
+      include: { companionDetail: true },
+      where: { id },
+    });
     if (!draft) {
-      throw new NotFoundException({ code: ErrorCode.NOT_FOUND, message: 'Draft not found' });
+      throw new NotFoundException({
+        code: ErrorCode.NOT_FOUND,
+        message: 'Draft not found',
+      });
     }
     if (draft.userId !== userId) {
-      throw new ForbiddenException({ code: ErrorCode.FORBIDDEN, message: 'Forbidden' });
+      throw new ForbiddenException({
+        code: ErrorCode.FORBIDDEN,
+        message: 'Forbidden',
+      });
     }
     return draft;
   }

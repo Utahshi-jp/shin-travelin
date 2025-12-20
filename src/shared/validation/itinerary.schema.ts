@@ -1,10 +1,24 @@
 import { z } from "zod";
 
+const spotCategorySchema = z.enum(["FOOD", "SIGHTSEEING", "MOVE", "REST", "STAY", "SHOPPING", "OTHER"]);
+
 const activitySchema = z.object({
   time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, { message: "HH:mm" }),
-  location: z.string().min(1).max(200),
-  content: z.string().min(1).max(500),
-  url: z.string().url().max(500).optional().or(z.literal("")),
+  area: z.string().min(1).max(200),
+  placeName: z
+    .string()
+    .max(200)
+    .nullable()
+    .optional(),
+  category: spotCategorySchema,
+  description: z.string().min(1).max(500),
+  stayMinutes: z
+    .number()
+    .int()
+    .min(5)
+    .max(1440)
+    .nullable()
+    .optional(),
   weather: z.string().min(3).max(20),
   orderIndex: z.number().min(0),
 });

@@ -10,7 +10,14 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, AuthModule, DraftsModule, AiModule, ItinerariesModule],
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    PrismaModule,
+    AuthModule,
+    DraftsModule,
+    AiModule,
+    ItinerariesModule,
+  ],
   controllers: [AppController],
   providers: [AppService],
 })

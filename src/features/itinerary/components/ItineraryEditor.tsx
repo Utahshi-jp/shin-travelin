@@ -16,6 +16,8 @@ import { itinerarySchema, ItineraryFormValues } from "@/shared/validation/itiner
 
 type DayScenario = "SUNNY" | "RAINY";
 type JobHighlights = { pending: number[]; completed: number[]; failed: number[] };
+type DayFieldErrors = FieldErrors<ItineraryFormValues["days"][number]>;
+type ActivityFieldErrors = FieldErrors<ItineraryFormValues["days"][number]["activities"][number]>;
 
 type Props = {
   itinerary: ItineraryFormValues;
@@ -29,6 +31,7 @@ type DayGroup = {
   entries: { scenario: DayScenario; formIndex: number; fieldId: string }[];
 };
 
+type EditorActivity = ItineraryFormValues["days"][number]["activities"][number];
 type DiffResult = { titleChanged: boolean; changedDayLabels: string[] };
 
 const SCENARIO_LABEL: Record<DayScenario, string> = {
@@ -55,10 +58,23 @@ const SCENARIO_THEME: Record<DayScenario, { bg: string; border: string; cellBg: 
   },
 };
 
+const CATEGORY_OPTIONS = [
+  { value: "SIGHTSEEING", label: "観光スポット" },
+  { value: "FOOD", label: "グルメ" },
+  { value: "SHOPPING", label: "買い物" },
+  { value: "REST", label: "休憩" },
+  { value: "MOVE", label: "移動" },
+  { value: "STAY", label: "宿泊" },
+  { value: "OTHER", label: "その他" },
+];
+
+const CATEGORY_LABEL_MAP = Object.fromEntries(CATEGORY_OPTIONS.map((option) => [option.value, option.label] as const));
+const EMPTY_DAYS: ItineraryFormValues["days"] = [];
+
 export function ItineraryEditor({ itinerary, onReloadLatest, highlights }: Props) {
   const form = useForm<ItineraryFormValues>({ resolver: zodResolver(itinerarySchema), defaultValues: itinerary, mode: "onBlur" });
   const daysArray = useFieldArray({ control: form.control, name: "days" });
-  const watchedDays = form.watch("days") ?? [];
+  const watchedDays = form.watch("days") ?? EMPTY_DAYS;
   const [message, setMessage] = useState<string | null>(null);
   const [conflict, setConflict] = useState<{ current: number; latest?: number } | null>(null);
   const [diff, setDiff] = useState<DiffResult | null>(null);
@@ -91,7 +107,8 @@ export function ItineraryEditor({ itinerary, onReloadLatest, highlights }: Props
         })),
       };
       const res = await api.updateItinerary(values.id, payload);
-      form.setValue("version", res.version, { shouldValidate: false, shouldDirty: false });
+      const updated = itinerarySchema.parse(res);
+      form.setValue("version", updated.version, { shouldValidate: false, shouldDirty: false });
       setMessage("保存しました");
       setConflict(null);
     } catch (err) {
@@ -324,8 +341,8 @@ function ScenarioSection({
   const tone = SCENARIO_THEME[scenario];
   const activitiesArray = useFieldArray({ control, name: `${path}.activities` as const });
   const dayIndex = Number(path.split(".")[1]);
-  const dayErrors = errors.days?.[dayIndex] as any;
-  const activityErrors = dayErrors?.activities ?? [];
+  const dayErrors = errors.days?.[dayIndex] as DayFieldErrors | undefined;
+  const activityErrors = (dayErrors?.activities ?? []) as ActivityFieldErrors[];
 
   const addActivity = () => {
     activitiesArray.append(createDefaultActivity(scenario));
@@ -354,20 +371,51 @@ function ScenarioSection({
                 {activityErrors?.[index]?.time && <span className="text-[11px] text-red-600">{activityErrors[index].time.message}</span>}
               </label>
               <label className="text-xs font-medium">
-                <span className="flex items-center gap-1">場所</span>
-                <input className="mt-1 w-full rounded border px-2 py-1" {...register(`${path}.activities.${index}.location` as const)} />
-                {activityErrors?.[index]?.location && <span className="text-[11px] text-red-600">{activityErrors[index].location.message}</span>}
+                <span className="flex items-center gap-1">エリア</span>
+                <input className="mt-1 w-full rounded border px-2 py-1" placeholder="例: 大通公園周辺" {...register(`${path}.activities.${index}.area` as const)} />
+                {activityErrors?.[index]?.area && <span className="text-[11px] text-red-600">{activityErrors[index].area.message}</span>}
               </label>
             </div>
             <label className="mt-2 block text-xs font-medium">
-              <span className="flex items-center gap-1">内容</span>
-              <textarea className="mt-1 w-full rounded border px-2 py-1" rows={2} {...register(`${path}.activities.${index}.content` as const)} />
-              {activityErrors?.[index]?.content && <span className="text-[11px] text-red-600">{activityErrors[index].content.message}</span>}
+              <span className="flex items-center gap-1">スポット名 (任意)</span>
+              <input className="mt-1 w-full rounded border px-2 py-1" placeholder="例: さっぽろテレビ塔" {...register(`${path}.activities.${index}.placeName` as const)} />
+              {activityErrors?.[index]?.placeName && <span className="text-[11px] text-red-600">{activityErrors[index].placeName.message}</span>}
             </label>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <label className="text-xs font-medium">
+                <span className="flex items-center gap-1">カテゴリ</span>
+                <select className="mt-1 w-full rounded border px-2 py-1" {...register(`${path}.activities.${index}.category` as const)}>
+                  {CATEGORY_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                {activityErrors?.[index]?.category && <span className="text-[11px] text-red-600">{activityErrors[index].category.message}</span>}
+              </label>
+              <label className="text-xs font-medium">
+                <span className="flex items-center gap-1">滞在目安 (分)</span>
+                <input
+                  type="number"
+                  min={5}
+                  max={1440}
+                  className="mt-1 w-full rounded border px-2 py-1"
+                  placeholder="60"
+                  {...register(`${path}.activities.${index}.stayMinutes` as const, {
+                    setValueAs: (value) => {
+                      if (value === "" || value === undefined || value === null) return undefined;
+                      const parsed = Number(value);
+                      return Number.isNaN(parsed) ? undefined : parsed;
+                    },
+                  })}
+                />
+                {activityErrors?.[index]?.stayMinutes && <span className="text-[11px] text-red-600">{activityErrors[index].stayMinutes.message}</span>}
+              </label>
+            </div>
             <label className="mt-2 block text-xs font-medium">
-              URL
-              <input className="mt-1 w-full rounded border px-2 py-1" {...register(`${path}.activities.${index}.url` as const)} />
-              {activityErrors?.[index]?.url && <span className="text-[11px] text-red-600">{activityErrors[index].url.message}</span>}
+              <span className="flex items-center gap-1">説明</span>
+              <textarea className="mt-1 w-full rounded border px-2 py-1" rows={3} placeholder="体験内容のメモ" {...register(`${path}.activities.${index}.description` as const)} />
+              {activityErrors?.[index]?.description && <span className="text-[11px] text-red-600">{activityErrors[index].description.message}</span>}
             </label>
             <input type="hidden" {...register(`${path}.activities.${index}.weather` as const)} />
             <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
@@ -395,12 +443,14 @@ function ScenarioSection({
   );
 }
 
-function createDefaultActivity(scenario: DayScenario) {
+function createDefaultActivity(scenario: DayScenario): EditorActivity {
   return {
     time: "09:00",
-    location: "",
-    content: "",
-    url: "",
+    area: "",
+    placeName: "",
+    category: "SIGHTSEEING",
+    description: "",
+    stayMinutes: 60,
     weather: scenario,
     orderIndex: 0,
   };
@@ -487,7 +537,6 @@ function DiffSummary({ diff }: { diff: DiffResult }) {
   );
 }
 
-type EditorActivity = ItineraryFormValues["days"][number]["activities"][number];
 type ComparisonSlot = { time: string; sunny?: EditorActivity; rainy?: EditorActivity };
 
 function DayComparisonGrid({ slots }: { slots: ComparisonSlot[] }) {
@@ -528,10 +577,18 @@ function ComparisonCell({ activity, variant }: { activity?: EditorActivity; vari
       </div>
     );
   }
+  const stayLabel = formatStayLabel(activity.stayMinutes);
   return (
     <div className={`space-y-1 rounded border p-2 text-[11px] ${tone.border} ${tone.cellBg}`}>
-      <p className="font-semibold text-slate-800">{activity.location || "場所未設定"}</p>
-      <p className="text-slate-600">{activity.content || "内容未設定"}</p>
+      <p className="font-semibold text-slate-800">{activity.area || "エリア未設定"}</p>
+      <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
+        <span className="rounded-full bg-white/60 px-2 py-0.5 font-semibold text-slate-700">
+          {CATEGORY_LABEL_MAP[activity.category] ?? activity.category}
+        </span>
+        {activity.placeName && <span>{activity.placeName}</span>}
+        {stayLabel && <span>{stayLabel}</span>}
+      </div>
+      <p className="text-slate-600">{activity.description || "内容未設定"}</p>
     </div>
   );
 }
@@ -600,4 +657,12 @@ function clampToRange(value: number, min: number, max: number) {
   if (value < min) return min;
   if (value > max) return max;
   return value;
+}
+
+function formatStayLabel(minutes?: number | null) {
+  if (!minutes || minutes <= 0) return "";
+  if (minutes < 60) return `${minutes}分滞在`;
+  const hours = minutes / 60;
+  if (Number.isInteger(hours)) return `${hours}時間滞在`;
+  return `約${minutes}分滞在`;
 }

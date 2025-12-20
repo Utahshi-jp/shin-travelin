@@ -6,7 +6,16 @@ import { HttpExceptionFilter } from '../shared/http-exception.filter';
 import { LoggingInterceptor } from '../shared/logging.interceptor';
 import { CorrelationIdMiddleware } from '../shared/correlation.middleware';
 import { ErrorCode } from '../shared/error-codes';
-import { prisma, resetDatabase, createTestUser, loginAndGetToken, createDraft, createSucceededJob, createItineraryForUser, closePrisma, connectPrisma } from './test-helpers';
+import {
+  prisma,
+  resetDatabase,
+  createTestUser,
+  loginAndGetToken,
+  createDraft,
+  createItineraryForUser,
+  closePrisma,
+  connectPrisma,
+} from './test-helpers';
 import { GenerationJobStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 
@@ -35,7 +44,9 @@ describe('Backend e2e', () => {
     );
     app.useGlobalFilters(new HttpExceptionFilter());
     app.useGlobalInterceptors(new LoggingInterceptor());
-    app.use((req, res, next) => new CorrelationIdMiddleware().use(req, res, next));
+    app.use((req, res, next) =>
+      new CorrelationIdMiddleware().use(req, res, next),
+    );
 
     await app.init();
   });
@@ -69,13 +80,18 @@ describe('Backend e2e', () => {
         .expect(200);
 
       const token = loginRes.body.accessToken as string;
-      const meRes = await request(app.getHttpServer()).get('/auth/me').set('Authorization', `Bearer ${token}`).expect(200);
+      const meRes = await request(app.getHttpServer())
+        .get('/auth/me')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
       expect(meRes.body.email).toBe(email);
     });
 
     it('auth/me without token returns UNAUTHORIZED', async () => {
       // Why: verifies guard + unified error envelope when JWT is missing.
-      const res = await request(app.getHttpServer()).get('/auth/me').expect(401);
+      const res = await request(app.getHttpServer())
+        .get('/auth/me')
+        .expect(401);
       expect(res.body.code).toBe(ErrorCode.UNAUTHORIZED);
       expect(res.body.correlationId).toBeDefined();
     });
@@ -109,7 +125,9 @@ describe('Backend e2e', () => {
         });
 
       if (res.status !== 400) {
-        throw new Error(`unexpected draft status=${res.status} body=${JSON.stringify(res.body)}`);
+        throw new Error(
+          `unexpected draft status=${res.status} body=${JSON.stringify(res.body)}`,
+        );
       }
       expect(res.body.code).toBe(ErrorCode.VALIDATION_ERROR);
       expect(res.body.correlationId).toBeDefined();
@@ -191,7 +209,11 @@ describe('Backend e2e', () => {
           status: 'ACTIVE',
         },
       });
-      const itinerary = await createItineraryForUser(user.id, draft.id, 'My Trip');
+      const itinerary = await createItineraryForUser(
+        user.id,
+        draft.id,
+        'My Trip',
+      );
 
       const res = await request(app.getHttpServer())
         .patch(`/itineraries/${itinerary.id}`)
@@ -206,7 +228,7 @@ describe('Backend e2e', () => {
     it('forbids access to other user itinerary', async () => {
       // Why: Enforces userId scoping (ER-2) so users cannot read others' plans.
       const { user: owner, password: ownerPassword } = await createTestUser();
-      const ownerToken = await loginAndGetToken(app, owner.email, ownerPassword);
+      await loginAndGetToken(app, owner.email, ownerPassword);
       const draft = await prisma.draft.create({
         data: {
           userId: owner.id,
@@ -219,10 +241,19 @@ describe('Backend e2e', () => {
           status: 'ACTIVE',
         },
       });
-      const itinerary = await createItineraryForUser(owner.id, draft.id, 'Owner Trip');
+      const itinerary = await createItineraryForUser(
+        owner.id,
+        draft.id,
+        'Owner Trip',
+      );
 
-      const { user: intruder, password: intruderPassword } = await createTestUser();
-      const intruderToken = await loginAndGetToken(app, intruder.email, intruderPassword);
+      const { user: intruder, password: intruderPassword } =
+        await createTestUser();
+      const intruderToken = await loginAndGetToken(
+        app,
+        intruder.email,
+        intruderPassword,
+      );
 
       const res = await request(app.getHttpServer())
         .get(`/itineraries/${itinerary.id}`)

@@ -1,4 +1,12 @@
-import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import {
+  ArgumentsHost,
+  Catch,
+  ExceptionFilter,
+  HttpException,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { ErrorCode, ErrorResponse } from './error-codes';
 
 @Catch()
@@ -7,12 +15,12 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
-    const response = ctx.getResponse();
-    const request = ctx.getRequest();
+    const response = ctx.getResponse<Response>();
+    const request = ctx.getRequest<Request & { correlationId?: string }>();
     const correlationId: string = request.correlationId ?? 'unknown';
 
     if (exception instanceof HttpException) {
-      const status = exception.getStatus();
+      const status = exception.getStatus() as HttpStatus;
       const res = exception.getResponse();
       const payload: ErrorResponse = {
         code: (res as any)?.code ?? this.mapStatusToCode(status),
@@ -20,7 +28,12 @@ export class HttpExceptionFilter implements ExceptionFilter {
         details: (res as any)?.details,
         correlationId,
       };
-      this.logger.warn({ correlationId, status, code: payload.code, message: payload.message });
+      this.logger.warn({
+        correlationId,
+        status,
+        code: payload.code,
+        message: payload.message,
+      });
       response.status(status).json(payload);
       return;
     }
@@ -35,7 +48,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     response.status(HttpStatus.INTERNAL_SERVER_ERROR).json(payload);
   }
 
-  private mapStatusToCode(status: number): ErrorCode {
+  private mapStatusToCode(status: HttpStatus): ErrorCode {
     switch (status) {
       case HttpStatus.BAD_REQUEST:
         return ErrorCode.VALIDATION_ERROR;

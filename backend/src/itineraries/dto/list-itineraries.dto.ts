@@ -1,5 +1,12 @@
 import { Type } from 'class-transformer';
-import { IsDateString, IsInt, IsOptional, IsString, Length, Min } from 'class-validator';
+import {
+  IsDateString,
+  IsInt,
+  IsOptional,
+  IsString,
+  Length,
+  Min,
+} from 'class-validator';
 
 /**
  * Query contract for GET /itineraries, enabling FR-3 search filters.

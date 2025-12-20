@@ -9,17 +9,36 @@ import { PrintToolbar } from "./PrintToolbar";
 type PrintDto = {
   id: string;
   title: string;
-  days: { dayIndex: number; date: string; scenario: "SUNNY" | "RAINY"; activities: { time: string; location: string; content: string }[] }[];
+  days: {
+    dayIndex: number;
+    date: string;
+    scenario: "SUNNY" | "RAINY";
+    activities: { time: string; area: string; placeName?: string | null; category: string; description: string; stayMinutes?: number | null }[];
+  }[];
 };
 
-export async function generateMetadata({ params }: { params: { id: string } }) {
+type RouteParams = { id: string };
+type RouteProps = { params: Promise<RouteParams> };
+
+const CATEGORY_LABELS: Record<string, string> = {
+  FOOD: "グルメ",
+  SIGHTSEEING: "観光",
+  MOVE: "移動",
+  REST: "休憩",
+  STAY: "宿泊",
+  SHOPPING: "買い物",
+  OTHER: "その他",
+};
+
+export async function generateMetadata({ params }: RouteProps) {
   try {
+    const { id } = await params;
     const token = (await cookies()).get("shin_access_token")?.value;
     if (!token) {
       return { title: "旅程印刷", openGraph: { title: "旅程印刷", description: "旅程の印刷ページ" } };
     }
-    const printable = await api.getPrintable(params.id, { token, cookieToken: token });
-    const url = `${process.env.NEXT_PUBLIC_APP_BASE_URL ?? "http://localhost:3000"}/itineraries/${params.id}/print`;
+    const printable = (await api.getPrintable(id, { token, cookieToken: token })) as PrintDto;
+    const url = `${process.env.NEXT_PUBLIC_APP_BASE_URL ?? "http://localhost:3000"}/itineraries/${id}/print`;
     return {
       title: `${printable.title} | 旅程印刷`,
       openGraph: {
@@ -33,8 +52,9 @@ export async function generateMetadata({ params }: { params: { id: string } }) {
   }
 }
 
-export default async function PrintPage({ params }: { params: { id: string } }) {
-  const token = cookies().get("shin_access_token")?.value;
+export default async function PrintPage({ params }: RouteProps) {
+  const { id } = await params;
+  const token = (await cookies()).get("shin_access_token")?.value;
   if (!token) {
     return (
       <main className="mx-auto max-w-3xl px-6 py-8">
@@ -54,7 +74,7 @@ export default async function PrintPage({ params }: { params: { id: string } }) 
   let data: PrintDto | null = null;
   let error: ApiError | null = null;
   try {
-    data = await api.getPrintable(params.id, { token, cookieToken: token });
+    data = (await api.getPrintable(id, { token, cookieToken: token })) as PrintDto;
   } catch (err) {
     error = err as ApiError;
   }
@@ -70,7 +90,7 @@ export default async function PrintPage({ params }: { params: { id: string } }) 
           <p className="text-xs text-red-600">{error.code}: {error.message}</p>
           {error.correlationId && <ToastNote correlationId={error.correlationId} />}
           <div className="mt-3 flex flex-wrap gap-2 text-xs">
-            <Link href={`/itineraries/${params.id}`} className="rounded-full border border-red-300 px-3 py-1" prefetch={false}>
+            <Link href={`/itineraries/${id}`} className="rounded-full border border-red-300 px-3 py-1" prefetch={false}>
               詳細へ戻る
             </Link>
             <Link href="/itineraries" className="rounded-full border px-3 py-1" prefetch={false}>
@@ -137,9 +157,18 @@ export default async function PrintPage({ params }: { params: { id: string } }) 
                       <tbody>
                         {variant.activities.map((act, idx) => (
                           <tr key={idx} className="align-top">
-                            <td className="w-16 px-1 py-1 font-mono text-xs text-slate-500">{act.time}</td>
-                            <td className="px-1 py-1 font-semibold text-slate-800">{act.location || "場所未設定"}</td>
-                            <td className="px-1 py-1 text-xs text-slate-600">{act.content || "内容未設定"}</td>
+                            <td className="w-16 px-1 py-2 font-mono text-xs text-slate-500">{act.time}</td>
+                            <td className="px-1 py-2">
+                              <p className="font-semibold text-slate-900">{act.area || "エリア未設定"}</p>
+                              <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                                <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">
+                                  {CATEGORY_LABELS[act.category] ?? act.category}
+                                </span>
+                                {act.placeName && <span>{act.placeName}</span>}
+                                {act.stayMinutes ? <span>{formatStay(act.stayMinutes)}</span> : null}
+                              </div>
+                              <p className="mt-1 text-xs text-slate-600">{act.description || "内容未設定"}</p>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -181,4 +210,12 @@ function resolveDateRange(dates: string[]) {
 function formatDate(value?: string) {
   if (!value) return "日付未設定";
   return new Date(value).toLocaleDateString("ja-JP");
+}
+
+function formatStay(value?: number | null) {
+  if (!value || value <= 0) return "";
+  if (value < 60) return `${value}分滞在`;
+  const hours = value / 60;
+  if (Number.isInteger(hours)) return `${hours}時間滞在`;
+  return `約${value}分滞在`;
 }

@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { ItineraryDetailClient } from "@/features/itinerary/components/ItineraryDetailClient";
 import { api, ApiError } from "@/shared/api/client";
-import { ItineraryFormValues } from "@/shared/validation/itinerary.schema";
+import { itinerarySchema, ItineraryFormValues } from "@/shared/validation/itinerary.schema";
 
 // Next.js 15: cookies/params/searchParams are async; await them before use.
 export default async function ItineraryDetailPage({
@@ -20,7 +20,8 @@ export default async function ItineraryDetailPage({
 
   let itinerary: ItineraryFormValues | null = null;
   try {
-    itinerary = await api.getItinerary(resolvedParams.id, { token, cookieToken: token });
+    const response = await api.getItinerary(resolvedParams.id, { token, cookieToken: token });
+    itinerary = itinerarySchema.parse(response);
   } catch (err) {
     const apiErr = err as ApiError;
     if (apiErr.status === 404) notFound();

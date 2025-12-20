@@ -54,7 +54,11 @@ export async function createTestUser() {
   return { user, password };
 }
 
-export async function loginAndGetToken(app: INestApplication, email: string, password: string) {
+export async function loginAndGetToken(
+  app: INestApplication,
+  email: string,
+  password: string,
+) {
   const res = await request(app.getHttpServer())
     .post('/auth/login')
     .send({ email, password })
@@ -88,7 +92,9 @@ export async function createDraft(app: INestApplication, token: string) {
     .send(payload);
 
   if (res.status !== 201) {
-    throw new Error(`createDraft failed status=${res.status} body=${JSON.stringify(res.body)}`);
+    throw new Error(
+      `createDraft failed status=${res.status} body=${JSON.stringify(res.body)}`,
+    );
   }
   return res.body.id as string;
 }
@@ -108,7 +114,11 @@ export async function createSucceededJob(draftId: string) {
   });
 }
 
-export async function createItineraryForUser(userId: string, draftId: string, title: string) {
+export async function createItineraryForUser(
+  userId: string,
+  draftId: string,
+  title: string,
+) {
   return prisma.itinerary.create({
     data: {
       userId,

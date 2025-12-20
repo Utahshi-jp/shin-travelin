@@ -1,5 +1,14 @@
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsInt, IsOptional, IsString, Length, Min, ValidateNested } from 'class-validator';
+import {
+  ArrayMinSize,
+  IsArray,
+  IsInt,
+  IsOptional,
+  IsString,
+  Length,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 import { DayDto } from './create-itinerary.dto';
 
 /**

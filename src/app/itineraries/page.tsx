@@ -16,6 +16,8 @@ type ListItem = {
   firstDate: string | null;
   lastDate: string | null;
   purposes: string[];
+  primaryAreas: string[];
+  experienceSummary: string | null;
 };
 type ListResponse = { items: ListItem[]; page: number; total: number; pageSize: number };
 
@@ -54,7 +56,8 @@ export default async function ItinerariesPage({ searchParams }: { searchParams: 
   let data: ListResponse | null = null;
   let error: ApiError | null = null;
   try {
-    data = await api.listItineraries(filters, { token, cookieToken: token });
+    const response = await api.listItineraries(filters, { token, cookieToken: token });
+    data = response as ListResponse;
   } catch (err) {
     error = err instanceof ApiError ? err : new ApiError({ status: 500, code: "UNKNOWN", message: "一覧取得に失敗しました" });
   }
@@ -143,7 +146,7 @@ export default async function ItinerariesPage({ searchParams }: { searchParams: 
     <main className="mx-auto max-w-4xl space-y-6 px-6 py-8">
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold">旅程一覧</h1>
-        <p className="text-sm text-slate-600">日付・目的・最近の更新を一覧で確認できます。カード全体がクリック可能です。</p>
+        <p className="text-sm text-slate-600">日付・目的に加えて主要エリアとハイライトを一目で確認できます。カード全体がクリック可能です。</p>
       </header>
 
       <SectionCard as="form" method="get" aria-label="旅程の検索フォーム" className="border-slate-200" title="検索とフィルタ" description="条件を入力すると即座に一覧が絞り込まれます。">
@@ -198,6 +201,8 @@ export default async function ItinerariesPage({ searchParams }: { searchParams: 
               : "日付未設定";
             const statusTone = hasDate ? "positive" : "warning";
             const statusLabel = hasDate ? "日程確定" : "日程調整中";
+            const primaryAreas = itinerary.primaryAreas?.slice(0, 3) ?? [];
+            const summary = itinerary.experienceSummary?.trim() || "AI がスポット概要を整理中です。";
             return (
               <li key={itinerary.id}>
                 <Link
@@ -218,7 +223,7 @@ export default async function ItinerariesPage({ searchParams }: { searchParams: 
                       <p className="font-mono">{new Date(itinerary.createdAt).toLocaleString()}</p>
                     </div>
                   </div>
-                  <div className="mt-3 flex flex-wrap gap-4 text-xs text-slate-600">
+                  <div className="mt-3 grid gap-3 text-xs text-slate-600 md:grid-cols-3">
                     <div>
                       <p className="font-semibold uppercase tracking-wide text-slate-500">期間</p>
                       <p>{rangeLabel}</p>
@@ -226,6 +231,31 @@ export default async function ItinerariesPage({ searchParams }: { searchParams: 
                     <div>
                       <p className="font-semibold uppercase tracking-wide text-slate-500">目的</p>
                       <p>{itinerary.purposes.length ? itinerary.purposes.slice(0, 2).join(", ") : "未設定"}</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold uppercase tracking-wide text-slate-500">記録</p>
+                      <p>{primaryAreas.length ? `${primaryAreas.length} エリア` : "エリア未設定"}</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-4 md:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+                    <div className="space-y-1">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">ハイライト</p>
+                      <p className="text-sm text-slate-700">{summary}</p>
+                    </div>
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">主要エリア</p>
+                      {primaryAreas.length ? (
+                        <div className="flex flex-wrap gap-2">
+                          {primaryAreas.map((area) => (
+                            <span key={area} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-0.5 text-xs font-medium text-slate-700">
+                              {area}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-500">エリア情報がまだありません</p>
+                      )}
                     </div>
                   </div>
                   {!!itinerary.purposes.length && (

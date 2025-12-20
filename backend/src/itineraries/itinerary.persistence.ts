@@ -1,10 +1,12 @@
-import { DayScenario, Prisma, Weather } from '@prisma/client';
+import { DayScenario, Prisma, SpotCategory, Weather } from '@prisma/client';
 
 export type PersistActivityInput = {
   time: string;
-  location: string;
-  content: string;
-  url?: string | null;
+  area: string;
+  placeName?: string | null;
+  category: string;
+  description: string;
+  stayMinutes?: number | null;
   weather?: string | null;
   orderIndex?: number | null;
 };
@@ -12,7 +14,7 @@ export type PersistActivityInput = {
 export type PersistDayInput = {
   dayIndex: number;
   date: string | Date;
-  scenario?: string | DayScenario;
+  scenario?: string;
   activities: PersistActivityInput[];
 };
 
@@ -27,7 +29,10 @@ export type PersistItineraryInput = {
   jobId?: string;
 };
 
-export async function persistItineraryGraph(tx: Prisma.TransactionClient, input: PersistItineraryInput) {
+export async function persistItineraryGraph(
+  tx: Prisma.TransactionClient,
+  input: PersistItineraryInput,
+) {
   if (!input.days || input.days.length === 0) {
     throw new Error('Itinerary requires at least one day');
   }
@@ -56,11 +61,15 @@ export async function persistItineraryGraph(tx: Prisma.TransactionClient, input:
         data: day.activities.map((activity, idx) => ({
           itineraryDayId: dayRow.id,
           time: activity.time,
-          location: activity.location,
-          content: activity.content,
-          url: activity.url ?? null,
+          area: activity.area,
+          placeName: activity.placeName ?? null,
+          category: normalizeCategory(activity.category),
+          description: activity.description,
+          stayMinutes: activity.stayMinutes ?? null,
           weather: normalizeWeather(activity.weather),
-          orderIndex: Number.isFinite(activity.orderIndex) ? Number(activity.orderIndex) : idx,
+          orderIndex: Number.isFinite(activity.orderIndex)
+            ? Number(activity.orderIndex)
+            : idx,
         })),
       });
     }
@@ -81,13 +90,46 @@ export async function persistItineraryGraph(tx: Prisma.TransactionClient, input:
   });
 
   if (input.jobId) {
-    await tx.generationJob.update({ where: { id: input.jobId }, data: { itineraryId: itinerary.id } });
+    await tx.generationJob.update({
+      where: { id: input.jobId },
+      data: { itineraryId: itinerary.id },
+    });
   }
 
   return itinerary;
 }
 
-export function sortDays<T extends { dayIndex: number; scenario?: string | DayScenario }>(days: T[]): T[] {
+function normalizeCategory(value?: string): SpotCategory {
+  if (!value) return SpotCategory.SIGHTSEEING;
+  const upper = value.trim().toUpperCase();
+  if (
+    (Object.keys(SpotCategory) as Array<keyof typeof SpotCategory>).includes(
+      upper as keyof typeof SpotCategory,
+    )
+  ) {
+    return SpotCategory[upper as keyof typeof SpotCategory];
+  }
+  switch (upper) {
+    case 'FOOD':
+      return SpotCategory.FOOD;
+    case 'MOVE':
+      return SpotCategory.MOVE;
+    case 'REST':
+      return SpotCategory.REST;
+    case 'STAY':
+      return SpotCategory.STAY;
+    case 'SHOPPING':
+      return SpotCategory.SHOPPING;
+    case 'SIGHTSEEING':
+      return SpotCategory.SIGHTSEEING;
+    default:
+      return SpotCategory.OTHER;
+  }
+}
+
+export function sortDays<T extends { dayIndex: number; scenario?: string }>(
+  days: T[],
+): T[] {
   return [...days].sort((a, b) => {
     if (a.dayIndex === b.dayIndex) {
       const aScenario = normalizeScenario(a.scenario);
@@ -99,14 +141,11 @@ export function sortDays<T extends { dayIndex: number; scenario?: string | DaySc
   });
 }
 
-function normalizeScenario(value?: string | DayScenario): DayScenario {
+function normalizeScenario(value?: string): DayScenario {
   if (!value) return DayScenario.SUNNY;
-  if (typeof value === 'string') {
-    const upper = value.trim().toUpperCase();
-    if (upper.startsWith('RAIN')) return DayScenario.RAINY;
-    return DayScenario.SUNNY;
-  }
-  return value;
+  const upper = value.trim().toUpperCase();
+  if (upper.startsWith('RAIN')) return DayScenario.RAINY;
+  return DayScenario.SUNNY;
 }
 
 function normalizeWeather(value?: string | null): Weather {
