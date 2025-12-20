@@ -351,10 +351,10 @@ export function ItineraryDetailClient({ id, jobId, initialItinerary }: Props) {
         <SectionCard
           tone="muted"
           title="保存済みの旅程"
-          description="生成済みのスケジュールにいつでも戻れます。"
+          description="生成したスケジュールはいつでも開き直せます。"
         >
           <p className="text-sm text-slate-600">
-            保存された旅程はすべて <span className="font-semibold">/itineraries</span> に並びます。別旅程と比べたいときや、過去のドラフトに戻りたいときにご利用ください。
+            保存済みの旅程は一覧ページにまとまり、過去のドラフトもすぐ取り出せます。
           </p>
           <div className="mt-4 flex flex-wrap gap-2 text-xs">
             <button type="button" onClick={reloadLatest} disabled={isReloading} className="rounded-full border px-3 py-1 disabled:opacity-60">
