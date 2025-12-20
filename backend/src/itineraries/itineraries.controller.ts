@@ -1,12 +1,26 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import type { Request } from 'express';
 import { randomUUID } from 'crypto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { ItinerariesService } from './itineraries.service';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
-import { RegenerateDto, RegenerateRequestDto } from './dto/regenerate.dto';
+import { RegenerateRequestDto } from './dto/regenerate.dto';
 import { ListItinerariesQueryDto } from './dto/list-itineraries.dto';
+
+type RequestWithCorrelation = Request & { correlationId?: string };
 
 @Controller('itineraries')
 @UseGuards(JwtAuthGuard)
@@ -19,14 +33,20 @@ export class ItinerariesController {
   @Post()
   @HttpCode(HttpStatus.GONE)
   create() {
-    return { message: 'Manual itinerary creation has been replaced by automatic persistence.' };
+    return {
+      message:
+        'Manual itinerary creation has been replaced by automatic persistence.',
+    };
   }
 
   /**
    * SSR-backed list endpoint with simple pagination (FR-3).
    */
   @Get()
-  list(@CurrentUser() user: { id: string }, @Query() query: ListItinerariesQueryDto) {
+  list(
+    @CurrentUser() user: { id: string },
+    @Query() query: ListItinerariesQueryDto,
+  ) {
     return this.itinerariesService.list(user.id, query);
   }
 
@@ -42,7 +62,11 @@ export class ItinerariesController {
    * Optimistic update; version is mandatory (AR-9 / ER-3).
    */
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateItineraryDto, @CurrentUser() user: { id: string }) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateItineraryDto,
+    @CurrentUser() user: { id: string },
+  ) {
     return this.itinerariesService.update(id, dto, user.id);
   }
 
@@ -55,10 +79,15 @@ export class ItinerariesController {
     @Param('id') id: string,
     @Body() body: RegenerateRequestDto,
     @CurrentUser() user: { id: string },
-    @Req() req: Request,
+    @Req() req: RequestWithCorrelation,
   ) {
-    const correlationId = (req as any).correlationId as string | undefined;
-    return this.itinerariesService.regenerate(id, { ...body, itineraryId: id }, user.id, correlationId ?? randomUUID());
+    const correlationId = req.correlationId;
+    return this.itinerariesService.regenerate(
+      id,
+      { ...body, itineraryId: id },
+      user.id,
+      correlationId ?? randomUUID(),
+    );
   }
 
   /**

@@ -2,6 +2,8 @@ import { z } from "zod";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
+export type ScenarioSelector = "BOTH" | "SUNNY" | "RAINY";
+
 type ErrorBody = { code: string; message: string; details?: unknown; correlationId?: string };
 
 export class ApiError extends Error {
@@ -110,7 +112,8 @@ export const api = {
   },
   getItinerary: (id: string, auth?: AuthTokens) => apiFetch(`/itineraries/${id}`, { auth }),
   updateItinerary: (id: string, body: unknown) => apiFetch(`/itineraries/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
-  regenerateItinerary: (id: string, days: number[]) =>
-    apiFetch<{ jobId: string }>(`/itineraries/${id}/regenerate`, { method: "POST", body: JSON.stringify({ days }) }),
+  regenerateItinerary: (id: string, params: { days: number[]; scenario?: ScenarioSelector }) =>
+    // Backend currently ignores scenario hints; keeping the field client-side lets us extend the payload later without breaking callers.
+    apiFetch<{ jobId: string }>(`/itineraries/${id}/regenerate`, { method: "POST", body: JSON.stringify({ days: params.days }) }),
   getPrintable: (id: string, auth?: AuthTokens) => apiFetch(`/itineraries/${id}/print`, { auth }),
 };

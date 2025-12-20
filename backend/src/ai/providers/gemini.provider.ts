@@ -2,7 +2,10 @@ import { Injectable, InternalServerErrorException } from '@nestjs/common';
 
 // Why: express retryability upstream by exposing status/body instead of obscuring inside HttpException.
 export class GeminiProviderError extends Error {
-  constructor(public readonly status: number, public readonly body: string) {
+  constructor(
+    public readonly status: number,
+    public readonly body: string,
+  ) {
     super(`Gemini error ${status}`);
   }
 }
@@ -15,7 +18,8 @@ export class GeminiProvider {
   async generate(prompt: string, model: string, temperature: number) {
     const apiKey = process.env.GEMINI_API_KEY;
     const isTest = process.env.NODE_ENV === 'test';
-    const shouldMock = process.env.USE_MOCK_GEMINI === 'true' || (!apiKey && isTest);
+    const shouldMock =
+      process.env.USE_MOCK_GEMINI === 'true' || (!apiKey && isTest);
 
     if (shouldMock) {
       // Why: e2e/unit テストでは本物の LLM を呼ばずに deterministic な応答を返し、タイムアウトやコストを防ぐ。
@@ -59,18 +63,28 @@ export class GeminiProvider {
           },
         ],
       };
-      return { rawText: JSON.stringify(mockJson), rawResponse: mockJson, request: { mock: true, prompt, model, temperature } };
+      return {
+        rawText: JSON.stringify(mockJson),
+        rawResponse: mockJson,
+        request: { mock: true, prompt, model, temperature },
+      };
     }
 
     if (!apiKey) {
-      throw new InternalServerErrorException({ code: 'AI_PROVIDER_ERROR', message: 'GEMINI_API_KEY is not configured' });
+      throw new InternalServerErrorException({
+        code: 'AI_PROVIDER_ERROR',
+        message: 'GEMINI_API_KEY is not configured',
+      });
     }
 
+    const normalizedModel = this.normalizeModelName(model);
     // Accept both "gemini-3-pro-preview" and "models/gemini-3-pro-preview".
-    const modelPath = model.startsWith('models/') ? model : `models/${model}`;
+    const modelPath = normalizedModel.startsWith('models/')
+      ? normalizedModel
+      : `models/${normalizedModel}`;
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/${modelPath}:generateContent?key=${apiKey}`;
     const requestBody = {
-      contents: [{ parts: [{ text: prompt }]}],
+      contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
         temperature,
         maxOutputTokens: 2048,
@@ -89,12 +103,30 @@ export class GeminiProvider {
     }
 
     try {
-      const parsed = JSON.parse(text) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+      const parsed = JSON.parse(text) as {
+        candidates?: { content?: { parts?: { text?: string }[] } }[];
+      };
       const candidate = parsed.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-      return { rawText: candidate || text, rawResponse: parsed, request: requestBody };
+      return {
+        rawText: candidate || text,
+        rawResponse: parsed,
+        request: requestBody,
+      };
     } catch {
       // If response body is not JSON, return raw text to allow pipeline parsing/backoff.
       return { rawText: text, rawResponse: text, request: requestBody };
     }
+  }
+
+  private normalizeModelName(input: string) {
+    const stripped = (input ?? '').split('#')[0].trim();
+    const compact = stripped.replace(/\s+/g, '');
+    if (!compact.length) {
+      throw new InternalServerErrorException({
+        code: 'AI_PROVIDER_ERROR',
+        message: 'AI model is not configured',
+      });
+    }
+    return compact;
   }
 }

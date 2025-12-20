@@ -505,8 +505,8 @@ LLM 呼び出しの **完全監査ログ**。削除禁止。
 
 - **背景**: 旧 `location/url/content` では AI 応答の揺らぎが大きく、URL の死活監視コストや位置情報欠損が発生していた。旅行者が把握したいのは「どのエリアで何をするか」「滞在時間はどれくらいか」であり、URL は MVP 以降に safely augment すべきと判断した。
 - **新フィールド**:
-  - `area` … 土地勘が伝わる粒度（例: 「大通公園周辺」「なんばエリア」）
-  - `placeName?` … 具体施設がある場合のみ設定（任意）
+  - `area` … 市区町村ベースで土地勘が伝わる粒度（例: 「札幌市中央区」「大阪市浪速区」）。必要に応じて後ろに簡潔な地区ラベルを付けてよい。
+  - `placeName?` … 具体施設がある場合のみ設定。ただし `AiPipeline` が `DESTINATION_FALLBACK_LIBRARY`（+ `DESTINATION_PLACE_ALIAS`）で実在性を確認できた名称だけを永続化し、未検証の名称は `null` に落として area だけを表示する。
   - `category` … SpotCategory（FOOD / SIGHTSEEING / MOVE / REST / STAY / SHOPPING / OTHER）
   - `description` … 体験内容 1 文 / 500 文字以内
   - `stayMinutes?` … 5–1440 分の範囲で滞在目安（任意）
@@ -516,6 +516,7 @@ LLM 呼び出しの **完全監査ログ**。削除禁止。
   3. AI プロンプトとモックプロバイダ（GeminiProvider）を area/placeName/category/stayMinutes を出力するよう更新し、既存のユニットテスト（`generation.flow.spec.ts`）のフィクスチャを再生成する。
   4. フロントエンド（一覧 / 詳細 / 印刷 / RHF schema）を area/placeName/category/description/stayMinutes に合わせて UI を再設計し、URL 入力欄を完全撤去する。
 - **補足**: URL が必要になった場合は別テーブル（`activity_links`）で任意に紐づけ、AI からの取得ではなく運営側ハンドブックに寄せる方針とする。
+  - **実在保証**: placeName のソースオブトゥルースは `destination-library.ts` で管理する全国カタログのみ。LLM 生成やフォールバックでカタログ外の名称が現れた場合は area-only にダウングレードし、ユーザーへ虚偽の POI を提示しない。
 
 ---
 
@@ -618,6 +619,8 @@ await this.prisma.$transaction(async (tx) => {
    - 3-4) **応答パース & 構造検証**
      - `code fence 除去 → JSON.parse → Zod 検証` の順で処理
      - 失敗時：raw を添えて「このJSONをスキーマに合わせて修復せよ」で再試行（最大3回、待機 1/3/9s）
+      - 正規化後に `validateAndSanitizeActivities` を実行し、`DESTINATION_FALLBACK_LIBRARY` へ存在する名称のみ placeName を維持する。 alias 変換できない名称は `undefined` にして area のみ提示する。
+      - `ensureMinimumActivities` のフォールバックも同カタログを優先し、枯渇した場合は「◯◯周辺の屋内エリア」など area のみのテンプレートで補う（新規 POI 名を生成しない）。
    - 3-5) **部分成功の扱い**
      - 成功した `dayIndex` のみ `partialDays` に保存
      - 失敗した日（未生成日）は残し、再生成対象にできるようにする
@@ -1074,8 +1077,10 @@ await this.prisma.$transaction(async (tx) => {
 2. 突然の天候変化に備え、晴天 / 悪天候で目的地は可能な限り近接させる。
 3. 旅行開始地点は {{origin}}、目的地は {{destinations}} から選ぶ。開始日は {{startDate}}、終了日は {{endDate}}。
 4. 予算は {{budget}} 円、目的は {{purposes}}、同行者は 成人男 {{adultMale}} 人、成人女 {{adultFemale}} 人、男児 {{boy}} 人、女児 {{girl}} 人、幼児 {{infant}} 人、ペット {{pet}} 匹、その他条件「{{notes}}」。
-5. 各 activity には `area`（土地勘が伝わる 1–200 文字）、任意の `placeName`、`category`（FOOD/SIGHTSEEING/MOVE/REST/STAY/SHOPPING/OTHER）、`description`（1 文 / 500 文字以内）、`stayMinutes`（5–1440）を含め、URL は書かない。
-6. 出力は次の JSON 形式のみ（余計な文章は不要）：
+5. 各 activity には `area`（必ず「京都市東山区」「札幌市中央区」のように市区町村レベルで 1–200 文字）、任意の `placeName`、`category`（FOOD/SIGHTSEEING/MOVE/REST/STAY/SHOPPING/OTHER）、`description`（1 文 / 500 文字以内）、`stayMinutes`（5–1440）を含め、URL は書かない。
+6. placeName は社内でキュレートした Real POI Catalog（`DESTINATION_FALLBACK_LIBRARY` と alias）を最優先で使用し、該当がない場合でも抽象表現（◯◯周辺のカフェ 等）でなければ自然言語で保持する。判定から漏れた場合のみ area だけで表現する。
+7. 同じ日付の SUNNY / RAINY は同一の時間帯スロット数・時刻を共有し、切り替え時に 1:1 対応で比較できるようにする。
+8. 出力は次の JSON 形式のみ（余計な文章は不要）：
 
 {
   "title": "〇〇旅行スケジュール",

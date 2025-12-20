@@ -8,8 +8,8 @@ const activitySchema = z.object({
   placeName: z
     .string()
     .max(200)
-    .optional()
-    .or(z.literal("")),
+    .nullable()
+    .optional(),
   category: spotCategorySchema,
   description: z.string().min(1).max(500),
   stayMinutes: z
@@ -17,6 +17,7 @@ const activitySchema = z.object({
     .int()
     .min(5)
     .max(1440)
+    .nullable()
     .optional(),
   weather: z.string().min(3).max(20),
   orderIndex: z.number().min(0),

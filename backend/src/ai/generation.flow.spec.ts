@@ -29,13 +29,23 @@ describe('AI schedule generation flow', () => {
       generationJob: {
         findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue({ id: 'job-1', itineraryId: null }),
-        update: jest.fn().mockImplementation(async (args: any) => ({ id: args.where.id, draft })),
-        findUnique: jest.fn().mockResolvedValue({ id: 'job-1', status: GenerationJobStatus.SUCCEEDED, itineraryId: null, error: null }),
+        update: jest.fn().mockImplementation((args: any) =>
+          Promise.resolve({
+            id: args.where.id,
+            draft,
+          }),
+        ),
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'job-1',
+          status: GenerationJobStatus.SUCCEEDED,
+          itineraryId: null,
+          error: null,
+        }),
       },
       aiGenerationAudit: {
-        create: jest.fn(async (data: any) => {
+        create: jest.fn((data: any) => {
           audits.push(data?.data ?? data);
-          return data;
+          return Promise.resolve(data);
         }),
         _audits: audits,
       },
@@ -48,53 +58,75 @@ describe('AI schedule generation flow', () => {
   };
 
   const geminiMock = {
-    generate: jest.fn(async () => ({
-      rawText:
-        '{"title":"Trip","days":[{"dayIndex":0,"date":"2025-01-10","scenario":"SUNNY","activities":[{"time":"09:00","area":"東山エリア","placeName":"清水寺","category":"SIGHTSEEING","description":"Visit temple","stayMinutes":90,"weather":"SUNNY","orderIndex":0}]}]}',
-      rawResponse: {},
-      request: { mock: true },
-    })),
+    generate: jest.fn(() =>
+      Promise.resolve({
+        rawText:
+          '{"title":"Trip","days":[{"dayIndex":0,"date":"2025-01-10","scenario":"SUNNY","activities":[{"time":"09:00","area":"東山エリア","placeName":"清水寺","category":"SIGHTSEEING","description":"Visit temple","stayMinutes":90,"weather":"SUNNY","orderIndex":0}]}]}',
+        rawResponse: {},
+        request: { mock: true },
+      }),
+    ),
   } as any;
 
   it('succeeds and records audit + partialDays', async () => {
     const prisma = makePrisma();
     const pipeline = new AiPipeline(prisma, geminiMock);
     const service = new AiService(prisma, pipeline as any);
-    jest.spyOn<any, any>(service as any, 'persistJobResult').mockResolvedValue(undefined);
+    jest
+      .spyOn<any, any>(service as any, 'persistJobResult')
+      .mockResolvedValue(undefined);
 
-    const result = await service.enqueue({ draftId: draft.id, targetDays: [] } as any, draft.userId, 'corr-flow');
+    const result = await service.enqueue(
+      { draftId: draft.id, targetDays: [] } as any,
+      draft.userId,
+      'corr-flow',
+    );
 
     expect(result.status).toBe(GenerationJobStatus.SUCCEEDED);
     expect(prisma.aiGenerationAudit.create).toHaveBeenCalled();
     expect(prisma.generationJob.update).toHaveBeenCalledWith({
       where: { id: 'job-1' },
-      data: expect.objectContaining({ status: GenerationJobStatus.SUCCEEDED, partialDays: [0] }),
+      data: expect.objectContaining({
+        status: GenerationJobStatus.SUCCEEDED,
+        partialDays: [0],
+      }),
     });
   });
 
   it('repairs malformed JSON and still succeeds', async () => {
     const prisma = makePrisma();
     const brokenGemini = {
-      generate: jest.fn(async () => ({
-        // Missing closing brackets; jsonrepair should fix.
-        rawText:
-          '{"title":"Trip","days":[{"dayIndex":0,"date":"2025-01-10","scenario":"SUNNY","activities":[{"time":"09:00","area":"東山エリア","placeName":"清水寺","category":"SIGHTSEEING","description":"Visit temple","stayMinutes":90,"weather":"SUNNY","orderIndex":0}]',
-        rawResponse: {},
-        request: { mock: true },
-      })),
+      generate: jest.fn(() =>
+        Promise.resolve({
+          // Missing closing brackets; jsonrepair should fix.
+          rawText:
+            '{"title":"Trip","days":[{"dayIndex":0,"date":"2025-01-10","scenario":"SUNNY","activities":[{"time":"09:00","area":"東山エリア","placeName":"清水寺","category":"SIGHTSEEING","description":"Visit temple","stayMinutes":90,"weather":"SUNNY","orderIndex":0}]',
+          rawResponse: {},
+          request: { mock: true },
+        }),
+      ),
     } as any;
 
     const pipeline = new AiPipeline(prisma, brokenGemini);
     const service = new AiService(prisma, pipeline as any);
-    jest.spyOn<any, any>(service as any, 'persistJobResult').mockResolvedValue(undefined);
+    jest
+      .spyOn<any, any>(service as any, 'persistJobResult')
+      .mockResolvedValue(undefined);
 
-    const result = await service.enqueue({ draftId: draft.id, targetDays: [] } as any, draft.userId, 'corr-broken');
+    const result = await service.enqueue(
+      { draftId: draft.id, targetDays: [] } as any,
+      draft.userId,
+      'corr-broken',
+    );
 
     expect(result.status).toBe(GenerationJobStatus.SUCCEEDED);
     expect(prisma.aiGenerationAudit.create).toHaveBeenCalled();
     expect(prisma.generationJob.update).toHaveBeenCalledWith({
       where: { id: 'job-1' },
-      data: expect.objectContaining({ status: GenerationJobStatus.SUCCEEDED, partialDays: [0] }),
+      data: expect.objectContaining({
+        status: GenerationJobStatus.SUCCEEDED,
+        partialDays: [0],
+      }),
     });
   });
 
@@ -107,18 +139,28 @@ describe('AI schedule generation flow', () => {
       error: 'provider_error_503',
     });
     const failingGemini = {
-      generate: jest.fn(async () => {
-        throw new GeminiProviderError(503, 'unavailable');
-      }),
+      generate: jest.fn(() =>
+        Promise.reject(new GeminiProviderError(503, 'unavailable')),
+      ),
     } as any;
 
     const pipeline = new AiPipeline(prisma, failingGemini);
     const service = new AiService(prisma, pipeline as any);
-    jest.spyOn<any, any>(service as any, 'persistJobResult').mockResolvedValue(undefined);
+    jest
+      .spyOn<any, any>(service as any, 'persistJobResult')
+      .mockResolvedValue(undefined);
 
-    const result = await service.enqueue({ draftId: draft.id, targetDays: [] } as any, draft.userId, 'corr-503');
+    const result = await service.enqueue(
+      { draftId: draft.id, targetDays: [] } as any,
+      draft.userId,
+      'corr-503',
+    );
 
     expect(result.status).toBe(GenerationJobStatus.FAILED);
-    expect(prisma.aiGenerationAudit._audits.some((a: any) => a.errorMessage === 'provider_error_503')).toBe(true);
+    expect(
+      prisma.aiGenerationAudit._audits.some(
+        (a: any) => a.errorMessage === 'provider_error_503',
+      ),
+    ).toBe(true);
   });
 });

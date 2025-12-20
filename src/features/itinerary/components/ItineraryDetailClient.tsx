@@ -403,6 +403,12 @@ type ScenarioMatrixDay = {
   slots: ScenarioMatrixSlot[];
 };
 
+type ItinerarySummarySource = ItineraryFormValues & { updatedAt?: string | Date };
+
+function hasUpdatedAt(source: ItineraryFormValues): source is ItinerarySummarySource {
+  return Object.prototype.hasOwnProperty.call(source, "updatedAt");
+}
+
 function ScenarioMatrix({ days }: { days: ScenarioMatrixDay[] }) {
   return (
     <div className="space-y-4">
@@ -490,7 +496,9 @@ function buildSummary(itinerary: ItineraryFormValues | null) {
   if (!itinerary) return null;
   const uniqueDays = Array.from(new Set(itinerary.days.map((day) => day.dayIndex))).length;
   const range = resolveDateRange(itinerary.days.map((day) => day.date));
-  const updatedLabel = itinerary.updatedAt ? new Date(itinerary.updatedAt).toLocaleString("ja-JP") : "未取得";
+  const updatedLabel = hasUpdatedAt(itinerary) && itinerary.updatedAt
+    ? new Date(itinerary.updatedAt).toLocaleString("ja-JP")
+    : "未取得";
   return {
     title: itinerary.title || "無題の旅程",
     items: [

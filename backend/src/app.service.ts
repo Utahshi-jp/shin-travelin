@@ -10,7 +10,7 @@ export class AppService {
     try {
       await this.prisma.$queryRaw`SELECT 1`;
       return { status: 'ok' };
-    } catch (_err) {
+    } catch {
       // Degrade gracefully so uptime checks do not explode the app.
       return { status: 'degraded' };
     }

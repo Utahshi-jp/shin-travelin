@@ -1,10 +1,22 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, UseGuards, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  UseGuards,
+  Req,
+} from '@nestjs/common';
 import type { Request } from 'express';
 import { randomUUID } from 'crypto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { AiService } from './ai.service';
 import { GenerateDto } from './dto/generate.dto';
+
+type RequestWithCorrelation = Request & { correlationId?: string };
 
 @Controller('ai')
 @UseGuards(JwtAuthGuard)
@@ -16,9 +28,13 @@ export class AiController {
    */
   @Post('generate')
   @HttpCode(HttpStatus.ACCEPTED)
-  generate(@Body() dto: GenerateDto, @CurrentUser() user: { id: string }, @Req() req: Request) {
-    const correlationId = (req as any).correlationId as string | undefined;
-    return this.aiService.enqueue(dto, user.id, correlationId ?? randomUUID());
+  generate(
+    @Body() dto: GenerateDto,
+    @CurrentUser() user: { id: string },
+    @Req() req: RequestWithCorrelation,
+  ) {
+    const correlationId = req.correlationId ?? randomUUID();
+    return this.aiService.enqueue(dto, user.id, correlationId);
   }
 
   /**

@@ -1,4 +1,8 @@
-import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { AiService } from './ai.service';
 import { GenerationJobStatus } from '@prisma/client';
 
@@ -28,8 +32,16 @@ describe('AiService.enqueue', () => {
       },
     } as any;
     prisma.draft.findUnique.mockResolvedValue(draft);
-    prisma.generationJob.create.mockResolvedValue({ id: 'job-1', itineraryId: null });
-    prisma.generationJob.findUnique.mockResolvedValue({ id: 'job-1', status: GenerationJobStatus.SUCCEEDED, itineraryId: null, error: null });
+    prisma.generationJob.create.mockResolvedValue({
+      id: 'job-1',
+      itineraryId: null,
+    });
+    prisma.generationJob.findUnique.mockResolvedValue({
+      id: 'job-1',
+      status: GenerationJobStatus.SUCCEEDED,
+      itineraryId: null,
+      error: null,
+    });
     return prisma;
   };
 
@@ -40,14 +52,26 @@ describe('AiService.enqueue', () => {
       .mockResolvedValueOnce(null); // existing reuse check
 
     const pipeline = {
-      run: jest.fn().mockResolvedValue({ status: GenerationJobStatus.SUCCEEDED, partialDays: [0], parsed: {} }),
+      run: jest.fn().mockResolvedValue({
+        status: GenerationJobStatus.SUCCEEDED,
+        partialDays: [0],
+        parsed: {},
+      }),
     } as any;
 
     const service = new AiService(prisma, pipeline);
-    const result = await service.enqueue({ draftId: draft.id, targetDays: [] } as any, draft.userId, 'corr-1');
+    const result = await service.enqueue(
+      { draftId: draft.id, targetDays: [] } as any,
+      draft.userId,
+      'corr-1',
+    );
 
     expect(prisma.generationJob.create).toHaveBeenCalledTimes(1);
-    expect(pipeline.run).toHaveBeenCalledWith('job-1', 'corr-1', expect.objectContaining({ model: expect.any(String) }));
+    expect(pipeline.run).toHaveBeenCalledWith(
+      'job-1',
+      'corr-1',
+      expect.objectContaining({ model: expect.any(String) }),
+    );
     expect(result.status).toBe(GenerationJobStatus.SUCCEEDED);
     expect(result.itineraryId).toBeNull();
   });
@@ -58,17 +82,24 @@ describe('AiService.enqueue', () => {
     const pipeline = { run: jest.fn() } as any;
     const service = new AiService(prisma, pipeline);
 
-    await expect(service.enqueue({ draftId: draft.id } as any, draft.userId, 'corr-2')).rejects.toBeInstanceOf(ConflictException);
+    await expect(
+      service.enqueue({ draftId: draft.id } as any, draft.userId, 'corr-2'),
+    ).rejects.toBeInstanceOf(ConflictException);
     expect(pipeline.run).not.toHaveBeenCalled();
   });
 
   it('throws Forbidden when draft owner mismatches', async () => {
     const prisma = makePrisma();
-    prisma.draft.findUnique.mockResolvedValue({ ...draft, userId: 'other-user' });
+    prisma.draft.findUnique.mockResolvedValue({
+      ...draft,
+      userId: 'other-user',
+    });
     const pipeline = { run: jest.fn() } as any;
     const service = new AiService(prisma, pipeline);
 
-    await expect(service.enqueue({ draftId: draft.id } as any, 'user-x', 'corr-3')).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      service.enqueue({ draftId: draft.id } as any, 'user-x', 'corr-3'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('throws NotFound when draft is missing', async () => {
@@ -77,6 +108,8 @@ describe('AiService.enqueue', () => {
     const pipeline = { run: jest.fn() } as any;
     const service = new AiService(prisma, pipeline);
 
-    await expect(service.enqueue({ draftId: 'missing' } as any, draft.userId, 'corr-4')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      service.enqueue({ draftId: 'missing' } as any, draft.userId, 'corr-4'),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });

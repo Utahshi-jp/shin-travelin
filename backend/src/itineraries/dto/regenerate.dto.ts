@@ -1,4 +1,11 @@
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsInt, IsUUID, Min } from 'class-validator';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsInt,
+  IsUUID,
+  Min,
+} from 'class-validator';
 
 /**
  * Partial regeneration target day indexes (FR-5 / AR-10).

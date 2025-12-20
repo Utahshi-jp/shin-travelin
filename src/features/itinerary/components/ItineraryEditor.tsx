@@ -659,7 +659,7 @@ function clampToRange(value: number, min: number, max: number) {
   return value;
 }
 
-function formatStayLabel(minutes?: number) {
+function formatStayLabel(minutes?: number | null) {
   if (!minutes || minutes <= 0) return "";
   if (minutes < 60) return `${minutes}分滞在`;
   const hours = minutes / 60;
