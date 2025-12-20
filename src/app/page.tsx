@@ -411,7 +411,7 @@ export default function Home() {
                 <ul className="mt-2 list-disc pl-4 space-y-1">
                   <li>ログイン済みであれば自動的に旅程が保存されます。</li>
                   <li>生成には最大 2 分ほどかかります。完了まで画面を閉じないでください。</li>
-                  <li>生成後は /itineraries からいつでも再編集できます。</li>
+                  <li>旅程は必要なときにすぐ見直したり更新できます。</li>
                 </ul>
               </div>
 
@@ -452,20 +452,20 @@ export default function Home() {
           <SectionCard
             tone="muted"
             title="生成後にできること"
-            description="旅程が完成したら以下の画面に遷移できます。どこからでも再開できるよう導線を統一しました。"
+            description="旅程完成後に開ける主な画面です。"
           >
             <ul className="space-y-2 text-sm text-slate-700">
               <li className="rounded-xl border border-slate-200 bg-white/70 p-3">
-                <p className="font-semibold">一覧 (/itineraries)</p>
-                <p className="text-xs text-slate-500">日付・目的・ステータスでソートし、次に開く旅程を迷わせません。</p>
+                <p className="font-semibold">旅程一覧</p>
+                <p className="text-xs text-slate-500">作成済みの旅程をまとめて確認し、目的やステータスでサッと絞り込めます。</p>
               </li>
               <li className="rounded-xl border border-slate-200 bg-white/70 p-3">
-                <p className="font-semibold">詳細 (/itineraries/[id])</p>
-                <p className="text-xs text-slate-500">全体 → 日別 → スポットの順で構造化。部分再生成もここから行います。</p>
+                <p className="font-semibold">旅程の詳細</p>
+                <p className="text-xs text-slate-500">日ごとの予定を追いながら、気になる部分だけ再生成・編集できます。</p>
               </li>
               <li className="rounded-xl border border-slate-200 bg-white/70 p-3">
-                <p className="font-semibold">印刷ビュー (/itineraries/[id]/print)</p>
-                <p className="text-xs text-slate-500">天候別のタイムラインをまとめ、共有・印刷しやすい余白を確保しています。</p>
+                <p className="font-semibold">共有・印刷ビュー</p>
+                <p className="text-xs text-slate-500">読みやすい紙面でそのまま共有・印刷できます。</p>
               </li>
             </ul>
           </SectionCard>
