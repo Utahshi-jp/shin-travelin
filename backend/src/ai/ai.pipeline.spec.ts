@@ -339,6 +339,33 @@ describe('AiPipeline retry flow', () => {
     expect(prisma.aiGenerationAudit.create).toHaveBeenCalled();
   });
 
+  it('injects destination overrides into the prompt', async () => {
+    const prisma = mockPrisma();
+    const provider = {
+      generate: jest.fn(() =>
+        Promise.resolve({
+          rawText:
+            '```json{"title":"trip","days":[{"dayIndex":0,"date":"2025-01-01","scenario":"SUNNY","activities":[{"time":"09:00","area":"札幌駅","placeName":"札幌市時計台","category":"SIGHTSEEING","description":"visit","orderIndex":0}]}]} ```',
+          rawResponse: {},
+          request: {},
+        }),
+      ),
+    } as any;
+
+    const pipeline = new AiPipeline(prisma, provider);
+    await pipeline.run('job1', 'cid-override', {
+      model: 'gemini-pro',
+      temperature: 0.3,
+      targetDays: [],
+      promptHash: 'hash',
+      overrideDestinations: ['札幌市', '小樽運河'],
+    });
+
+    const prompt = provider.generate.mock.calls[0][0];
+    expect(prompt).toContain('札幌市');
+    expect(prompt).toContain('小樽運河');
+  });
+
   it('fails after retries on parse errors', async () => {
     const prisma = mockPrisma();
     const provider = {

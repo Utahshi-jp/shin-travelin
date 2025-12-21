@@ -1,21 +1,15 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
+import { sanitizeItinerary } from "@/features/itinerary/utils/sanitizeItinerary";
 import { api, ApiError } from "@/shared/api/client";
 import { KeyValueList } from "@/shared/ui/KeyValueList";
 import { ToastNote } from "@/shared/ui/ToastProvider";
+import { itinerarySchema, ItineraryFormValues } from "@/shared/validation/itinerary.schema";
 import { PrintToolbar } from "./PrintToolbar";
 
-type PrintDto = {
-  id: string;
-  title: string;
-  days: {
-    dayIndex: number;
-    date: string;
-    scenario: "SUNNY" | "RAINY";
-    activities: { time: string; area: string; placeName?: string | null; category: string; description: string; stayMinutes?: number | null }[];
-  }[];
-};
+type DayVariant = ItineraryFormValues["days"][number];
+type PrintGroup = { dayIndex: number; date: string; variants: DayVariant[] };
 
 type RouteParams = { id: string };
 type RouteProps = { params: Promise<RouteParams> };
@@ -29,6 +23,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   SHOPPING: "買い物",
   OTHER: "その他",
 };
+const SCENARIO_ORDER: Record<"SUNNY" | "RAINY", number> = { SUNNY: 0, RAINY: 1 };
 
 export async function generateMetadata({ params }: RouteProps) {
   try {
@@ -37,7 +32,8 @@ export async function generateMetadata({ params }: RouteProps) {
     if (!token) {
       return { title: "旅程印刷", openGraph: { title: "旅程印刷", description: "旅程の印刷ページ" } };
     }
-    const printable = (await api.getPrintable(id, { token, cookieToken: token })) as PrintDto;
+    const printable = await fetchPrintableItinerary(id, token);
+    if (!printable) return { title: "旅程印刷" };
     const url = `${process.env.NEXT_PUBLIC_APP_BASE_URL ?? "http://localhost:3000"}/itineraries/${id}/print`;
     return {
       title: `${printable.title} | 旅程印刷`,
@@ -71,10 +67,10 @@ export default async function PrintPage({ params }: RouteProps) {
     );
   }
 
-  let data: PrintDto | null = null;
+  let data: ItineraryFormValues | null = null;
   let error: ApiError | null = null;
   try {
-    data = (await api.getPrintable(id, { token, cookieToken: token })) as PrintDto;
+    data = await fetchPrintableItinerary(id, token);
   } catch (err) {
     error = err as ApiError;
   }
@@ -86,7 +82,7 @@ export default async function PrintPage({ params }: RouteProps) {
       <main className="mx-auto max-w-3xl px-6 py-8 print:px-0">
         <h1 className="text-2xl font-bold">旅程印刷</h1>
         <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          <p>印刷用データの取得に失敗しました。</p>
+          <p>旅程データの取得に失敗しました。</p>
           <p className="text-xs text-red-600">{error.code}: {error.message}</p>
           {error.correlationId && <ToastNote correlationId={error.correlationId} />}
           <div className="mt-3 flex flex-wrap gap-2 text-xs">
@@ -104,19 +100,14 @@ export default async function PrintPage({ params }: RouteProps) {
 
   if (!data) notFound();
 
-  const grouped = data!.days.reduce<Record<number, PrintDto["days"]>>((acc, day) => {
-    const bucket = acc[day.dayIndex] ?? [];
-    bucket.push(day);
-    acc[day.dayIndex] = bucket.sort((a, b) => (a.scenario > b.scenario ? 1 : -1));
-    return acc;
-  }, {});
-  const summary = buildPrintSummary(data!.days);
+  const grouped = groupDaysForPrint(data.days);
+  const summary = buildPrintSummary(data.days);
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-8 print:px-6">
       <header className="space-y-4 border-b border-slate-200 pb-6 print:border-none">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">PRINT SHEET</p>
-        <h1 className="text-3xl font-semibold text-slate-900 print:text-center">{data!.title}</h1>
+        <h1 className="text-3xl font-semibold text-slate-900 print:text-center">{data.title}</h1>
         <KeyValueList
           columns={2}
           items={[
@@ -130,60 +121,80 @@ export default async function PrintPage({ params }: RouteProps) {
       </header>
 
       <section className="mt-6 space-y-5 print:space-y-3">
-        {Object.entries(grouped)
-          .sort((a, b) => Number(a[0]) - Number(b[0]))
-          .map(([dayIndex, variants]) => (
-            <article
-              key={dayIndex}
-              className="rounded-2xl border border-slate-200 bg-white p-4 print:break-inside-avoid print:border-slate-100"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-base font-semibold text-slate-900">Day {Number(dayIndex) + 1}</h2>
-                  <p className="text-xs text-slate-500">{formatDate(variants[0]?.date)}</p>
-                </div>
-                <div className="flex gap-2 text-xs text-slate-500">
-                  <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-700">晴天</span>
-                  <span className="rounded-full bg-blue-50 px-2 py-0.5 text-blue-700">悪天候</span>
-                </div>
+        {grouped.map((group) => (
+          <article
+            key={group.dayIndex}
+            className="rounded-2xl border border-slate-200 bg-white p-4 print:break-inside-avoid print:border-slate-100"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-slate-900">Day {group.dayIndex + 1}</h2>
+                <p className="text-xs text-slate-500">{formatDate(group.date)}</p>
               </div>
-              <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                {variants.map((variant, i) => (
-                  <div key={`${variant.scenario}-${i}`} className="rounded-2xl border border-dashed border-slate-300 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      {variant.scenario === "RAINY" ? "悪天候プラン" : "晴天プラン"} / {formatDate(variant.date)}
-                    </p>
-                    <table className="mt-2 w-full text-sm">
-                      <tbody>
-                        {variant.activities.map((act, idx) => (
-                          <tr key={idx} className="align-top">
-                            <td className="w-16 px-1 py-2 font-mono text-xs text-slate-500">{act.time}</td>
-                            <td className="px-1 py-2">
-                              <p className="font-semibold text-slate-900">{act.area || "エリア未設定"}</p>
-                              <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                                <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">
-                                  {CATEGORY_LABELS[act.category] ?? act.category}
-                                </span>
-                                {act.placeName && <span>{act.placeName}</span>}
-                                {act.stayMinutes ? <span>{formatStay(act.stayMinutes)}</span> : null}
-                              </div>
-                              <p className="mt-1 text-xs text-slate-600">{act.description || "内容未設定"}</p>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ))}
+              <div className="flex gap-2 text-xs text-slate-500">
+                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-700">晴天</span>
+                <span className="rounded-full bg-blue-50 px-2 py-0.5 text-blue-700">悪天候</span>
               </div>
-            </article>
-          ))}
+            </div>
+            <div className="mt-3 grid gap-3 lg:grid-cols-2">
+              {group.variants.map((variant, i) => (
+                <div key={`${variant.scenario}-${i}`} className="rounded-2xl border border-dashed border-slate-300 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    {variant.scenario === "RAINY" ? "悪天候プラン" : "晴天プラン"} / {formatDate(variant.date)}
+                  </p>
+                  <table className="mt-2 w-full text-sm">
+                    <tbody>
+                      {variant.activities.map((act, idx) => (
+                        <tr key={idx} className="align-top">
+                          <td className="w-16 px-1 py-2 font-mono text-xs text-slate-500">{act.time}</td>
+                          <td className="px-1 py-2">
+                            <p className="font-semibold text-slate-900">{act.area || "エリア未設定"}</p>
+                            <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                              <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">
+                                {CATEGORY_LABELS[act.category] ?? act.category}
+                              </span>
+                              {act.placeName && <span>{act.placeName}</span>}
+                              {act.stayMinutes ? <span>{formatStay(act.stayMinutes)}</span> : null}
+                            </div>
+                            <p className="mt-1 text-xs text-slate-600">{act.description || "内容未設定"}</p>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+          </article>
+        ))}
       </section>
     </main>
   );
 }
 
-function buildPrintSummary(days: PrintDto["days"]) {
+async function fetchPrintableItinerary(id: string, token?: string) {
+  if (!token) return null;
+  const response = await api.getItinerary(id, { token, cookieToken: token });
+  return sanitizeItinerary(itinerarySchema.parse(response));
+}
+
+function groupDaysForPrint(days: ItineraryFormValues["days"]): PrintGroup[] {
+  const map = new Map<number, PrintGroup>();
+  days.forEach((day) => {
+    const bucket = map.get(day.dayIndex) ?? { dayIndex: day.dayIndex, date: day.date, variants: [] };
+    bucket.date = day.date ?? bucket.date;
+    bucket.variants.push(day);
+    map.set(day.dayIndex, bucket);
+  });
+  return Array.from(map.values())
+    .sort((a, b) => a.dayIndex - b.dayIndex)
+    .map((group) => ({
+      ...group,
+      variants: group.variants.slice().sort((a, b) => SCENARIO_ORDER[a.scenario] - SCENARIO_ORDER[b.scenario]),
+    }));
+}
+
+function buildPrintSummary(days: ItineraryFormValues["days"]) {
   const uniqueDays = new Set(days.map((day) => day.dayIndex)).size;
   const activityCount = days.reduce((sum, day) => sum + day.activities.length, 0);
   const dateRange = resolveDateRange(days.map((day) => day.date));

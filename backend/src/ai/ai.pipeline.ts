@@ -30,6 +30,7 @@ type RunOptions = {
   temperature: number;
   targetDays: number[];
   promptHash: string;
+  overrideDestinations?: string[];
 };
 
 type NormalizedActivity = {
@@ -295,14 +296,16 @@ export class AiPipeline {
     const daysText = targetDays.length
       ? targetDays.map((d) => totalDates[d]).filter(Boolean)
       : totalDates;
-    const destinations = draft.destinations ?? [];
+    const destinations = Array.isArray(draft.destinations)
+      ? draft.destinations
+      : [];
     const destinationGuidelines = this.buildDestinationGuidelines(destinations);
     const destinationExamples = this.buildDestinationExamples(destinations);
 
     return [
       'You are a travel planner. Generate concise itinerary JSON only.',
       `Origin: ${draft.origin}`,
-      `Destinations: ${draft.destinations.join(', ')}`,
+      `Destinations: ${destinations.join(', ')}`,
       `Date range: ${draft.startDate.toISOString().slice(0, 10)} to ${draft.endDate.toISOString().slice(0, 10)}`,
       `Budget: ${draft.budget}`,
       `Purposes: ${draft.purposes.join(', ')}`,
@@ -987,6 +990,20 @@ export class AiPipeline {
       }
     });
     return lines;
+  }
+
+  private applyDestinationOverrides(
+    draft: DraftWithCompanion,
+    overrides?: string[],
+  ): DraftWithCompanion {
+    if (!Array.isArray(overrides) || !overrides.length) return draft;
+    const unique = overrides
+      .map((value) => (typeof value === 'string' ? value.trim() : ''))
+      .filter((value): value is string => Boolean(value))
+      .filter((value, index, array) => array.indexOf(value) === index)
+      .slice(0, 5);
+    if (!unique.length) return draft;
+    return { ...draft, destinations: unique };
   }
 
   private resolveRealPlaceName(value?: string | null) {
@@ -1855,7 +1872,11 @@ export class AiPipeline {
       include: { draft: { include: { companionDetail: true } } },
     });
 
-    const draft = job.draft as DraftWithCompanion;
+    const draftWithOverride = this.applyDestinationOverrides(
+      job.draft as DraftWithCompanion,
+      options.overrideDestinations,
+    );
+    const draft = draftWithOverride;
     const totalDates = this.expandDates(draft.startDate, draft.endDate);
     const expectedDayIndexes = (
       options.targetDays.length

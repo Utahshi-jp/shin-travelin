@@ -568,7 +568,6 @@ function AuthBox({ onLogin, onRegister, feedback }: AuthBoxProps) {
 
   return (
     <section aria-label="認証フォーム" className="space-y-4 text-sm text-slate-700">
-      <p className="text-xs text-slate-500">メール / パスワードは社内検証用。取得したトークンはブラウザにのみ保存します。</p>
       <div className="grid gap-3">
         <label className="space-y-1">
           <span className="text-xs font-semibold text-slate-600">メールアドレス</span>
@@ -598,7 +597,6 @@ function AuthBox({ onLogin, onRegister, feedback }: AuthBoxProps) {
             className={inputClass}
             placeholder="例: 旅のしおり作成チーム"
           />
-          <p className="text-[11px] text-slate-500">旅程の作成者名としてサーバーに保存され、共有ログなどで参照されます。</p>
         </label>
       </div>
       <div className="flex flex-wrap gap-2">

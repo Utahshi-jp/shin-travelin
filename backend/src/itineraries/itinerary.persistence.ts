@@ -99,6 +99,83 @@ export async function persistItineraryGraph(
   return itinerary;
 }
 
+export async function replaceItineraryDays(
+  tx: Prisma.TransactionClient,
+  itineraryId: string,
+  days: PersistDayInput[],
+) {
+  if (!days || !days.length) return;
+
+  const sortedDays = sortDays(days);
+  const targetIndexes = Array.from(
+    new Set(sortedDays.map((day) => day.dayIndex)),
+  );
+  const existingDays = await tx.itineraryDay.findMany({
+    where: {
+      itineraryId,
+      dayIndex: { in: targetIndexes },
+    },
+    select: {
+      id: true,
+      dayIndex: true,
+      scenario: true,
+    },
+  });
+
+  const dayKey = (dayIndex: number, scenario: DayScenario) =>
+    `${dayIndex}:${scenario}`;
+  const dayMap = new Map<string, string>();
+  existingDays.forEach((day) => {
+    dayMap.set(dayKey(day.dayIndex, day.scenario), day.id);
+  });
+
+  for (const day of sortedDays) {
+    const normalizedScenario = normalizeScenario(day.scenario);
+    const key = dayKey(day.dayIndex, normalizedScenario);
+    const dateValue =
+      typeof day.date === 'string' ? new Date(day.date) : day.date;
+    let itineraryDayId: string;
+
+    if (dayMap.has(key)) {
+      itineraryDayId = dayMap.get(key)!;
+      await tx.activity.deleteMany({ where: { itineraryDayId } });
+      await tx.itineraryDay.update({
+        where: { id: itineraryDayId },
+        data: { date: dateValue, scenario: normalizedScenario },
+      });
+    } else {
+      const createdDay = await tx.itineraryDay.create({
+        data: {
+          itineraryId,
+          dayIndex: day.dayIndex,
+          date: dateValue,
+          scenario: normalizedScenario,
+        },
+      });
+      itineraryDayId = createdDay.id;
+      dayMap.set(key, itineraryDayId);
+    }
+
+    if (day.activities && day.activities.length) {
+      await tx.activity.createMany({
+        data: day.activities.map((activity, idx) => ({
+          itineraryDayId,
+          time: activity.time,
+          area: activity.area,
+          placeName: activity.placeName ?? null,
+          category: normalizeCategory(activity.category),
+          description: activity.description,
+          stayMinutes: activity.stayMinutes ?? null,
+          weather: normalizeWeather(activity.weather),
+          orderIndex: Number.isFinite(activity.orderIndex)
+            ? Number(activity.orderIndex)
+            : idx,
+        })),
+      });
+    }
+  }
+}
+
 function normalizeCategory(value?: string): SpotCategory {
   if (!value) return SpotCategory.SIGHTSEEING;
   const upper = value.trim().toUpperCase();
