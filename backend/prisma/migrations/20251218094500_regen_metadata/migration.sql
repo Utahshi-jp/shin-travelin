@@ -1,0 +1,2 @@
+-- Historical migration placeholder: regen_metadata adjustments were applied manually.
+-- No schema changes are introduced here; the file exists to keep Prisma migration history consistent.

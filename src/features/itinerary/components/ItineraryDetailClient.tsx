@@ -10,6 +10,7 @@ import { SectionCard } from "@/shared/ui/SectionCard";
 import { StateCallout } from "@/shared/ui/StateCallout";
 import { useToast } from "@/shared/ui/ToastProvider";
 import { ItineraryFormValues } from "@/shared/validation/itinerary.schema";
+import { sanitizeItinerary } from "../utils/sanitizeItinerary";
 import { ItineraryEditor } from "./ItineraryEditor";
 
 const POLL_SCHEDULE_MS = [2000, 4000, 8000];
@@ -67,6 +68,18 @@ export function ItineraryDetailClient({ id, jobId, initialItinerary }: Props) {
   const [pendingDays, setPendingDays] = useState<number[]>([]);
   const [highlights, setHighlights] = useState<Highlights>({ pending: [], completed: [], failed: [] });
   const [scenarioMode, setScenarioMode] = useState<ScenarioSelector>("BOTH");
+  const [destinationInputs, setDestinationInputs] = useState<string[]>([]);
+  const destinationHints = useMemo(() => {
+    const trimmed = destinationInputs
+      .map((value) => value.trim())
+      .filter((value) => value.length >= 3 && value.length <= 200);
+    const unique: string[] = [];
+    trimmed.forEach((value) => {
+      if (!unique.includes(value)) unique.push(value);
+    });
+    return unique.slice(0, 5);
+  }, [destinationInputs]);
+  const canAddDestinationHint = destinationInputs.length < 5;
   useEffect(() => {
     setItinerary(sanitizeItinerary(initialItinerary));
   }, [initialItinerary]);
@@ -101,6 +114,18 @@ export function ItineraryDetailClient({ id, jobId, initialItinerary }: Props) {
       .sort((a, b) => a[0] - b[0])
       .map(([dayIndex, date]) => ({ dayIndex, date }));
   }, [itinerary]);
+
+  const appendDestinationHint = () => {
+    setDestinationInputs((current) => (current.length >= 5 ? current : [...current, ""]));
+  };
+
+  const removeDestinationHint = (index: number) => {
+    setDestinationInputs((current) => current.filter((_, idx) => idx !== index));
+  };
+
+  const updateDestinationHint = (index: number, value: string) => {
+    setDestinationInputs((current) => current.map((entry, idx) => (idx === index ? value : entry)));
+  };
 
   useEffect(() => {
     setSelectedDays((current) => current.filter((index) => dayOptions.some((day) => day.dayIndex === index)));
@@ -198,7 +223,11 @@ export function ItineraryDetailClient({ id, jobId, initialItinerary }: Props) {
     setIsRegenerating(true);
     try {
       const sortedTargets = [...targetDays].sort((a, b) => a - b);
-      const { jobId: nextJobId } = await api.regenerateItinerary(id, { days: sortedTargets, scenario: scenarioMode });
+      const payload: { days: number[]; destinations?: string[] } = { days: sortedTargets };
+      if (destinationHints.length) {
+        payload.destinations = destinationHints;
+      }
+      const { jobId: nextJobId } = await api.regenerateItinerary(id, payload);
       setActiveJobId(nextJobId);
       setJobState({ status: "queued", jobId: nextJobId, attempts: 0, partialDays: [] });
       setPendingDays(sortedTargets);
@@ -338,6 +367,46 @@ export function ItineraryDetailClient({ id, jobId, initialItinerary }: Props) {
               クリア
             </button>
           </div>
+          <div className="mt-4 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-slate-900">目的地のヒント（任意）</p>
+              <span className="text-[11px] text-slate-500">最大5件</span>
+            </div>
+            <p className="text-xs text-slate-500">部分再生成で重視したい都市やランドマークを入力すると、AIが新しい文脈を反映しやすくなります。</p>
+            <div className="space-y-2">
+              {destinationInputs.map((value, index) => (
+                <div key={`regen-destination-${index}`} className="flex gap-2">
+                  <input
+                    value={value}
+                    onChange={(event) => updateDestinationHint(index, event.target.value)}
+                    className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm transition focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    placeholder={index === 0 ? "例: 札幌市" : "例: 小樽運河"}
+                    aria-label={`目的地ヒント ${index + 1}`}
+                  />
+                  <button
+                    type="button"
+                    aria-label={`目的地ヒント ${index + 1} を削除`}
+                    onClick={() => removeDestinationHint(index)}
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:border-red-200 hover:text-red-600"
+                  >
+                    削除
+                  </button>
+                </div>
+              ))}
+              {!destinationInputs.length && <p className="text-xs text-slate-400">例: 札幌市 / 小樽運河 / 美瑛の丘</p>}
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
+              <span>{destinationHints.length ? `${destinationHints.length} 件送信予定` : "空欄の行は自動で除外されます"}</span>
+              <button
+                type="button"
+                onClick={appendDestinationHint}
+                disabled={!canAddDestinationHint}
+                className="rounded-full border border-slate-300 px-3 py-1 font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                目的地を追加
+              </button>
+            </div>
+          </div>
           <button
             type="button"
             onClick={() => handleRegenerate()}
@@ -351,28 +420,23 @@ export function ItineraryDetailClient({ id, jobId, initialItinerary }: Props) {
         <SectionCard
           tone="muted"
           title="保存済みの旅程"
-          description="生成したスケジュールはいつでも開き直せます。"
+          description="部分再生成を送信すると即時に反映され、生成したスケジュールはいつでも開き直せます。"
         >
           <p className="text-sm text-slate-600">
-            保存済みの旅程は一覧ページにまとまり、過去のドラフトもすぐ取り出せます。
+            保存済みの旅程は一覧ページにまとまり、過去のドラフトや印刷ビューもここからすぐに開けます。
           </p>
           <div className="mt-4 flex flex-wrap gap-2 text-xs">
-            <button type="button" onClick={reloadLatest} disabled={isReloading} className="rounded-full border px-3 py-1 disabled:opacity-60">
-              最新を再取得
-            </button>
-            <button
-              type="button"
-              onClick={handleRegenerateAll}
-              className="rounded-full border px-3 py-1"
-              disabled={!!activeJobId || isRegenerating || !dayOptions.length}
-            >
-              全日を再生成
-            </button>
             <Link
               href="/itineraries"
               className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
             >
               保存済み旅程を開く
+            </Link>
+            <Link
+              href={`/itineraries/${id}/print`}
+              className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-400"
+            >
+              印刷はここから
             </Link>
           </div>
         </SectionCard>
@@ -588,69 +652,18 @@ function normalizeScenarioSlotTime(time: string | undefined, index: number, scen
   }
   const match = time.match(/(\d{1,2}):(\d{2})/);
   if (match) {
-    const hour = clamp(parseInt(match[1], 10), 0, 23);
-    const minute = clamp(parseInt(match[2], 10), 0, 59);
+    const hour = clampNumber(parseInt(match[1], 10), 0, 23);
+    const minute = clampNumber(parseInt(match[2], 10), 0, 59);
     const label = `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
     return { key: label, label, order: hour * 60 + minute };
   }
   return { key: `${time}-${scenario}-${index}`, label: time, order: 24 * 60 + index };
 }
 
-function sanitizeItinerary(itinerary: ItineraryFormValues | null): ItineraryFormValues | null {
-  if (!itinerary) return null;
-  return {
-    ...itinerary,
-    days: itinerary.days.map((day) => ({
-      ...day,
-      date: normalizeDateField(day.date),
-      activities: (day.activities ?? []).map((activity) => ({
-        ...activity,
-        time: normalizeTimeField(activity.time),
-        area: activity.area ?? "",
-        placeName: activity.placeName ?? "",
-        category: activity.category ?? "SIGHTSEEING",
-        description: activity.description ?? "",
-        stayMinutes: normalizeStayMinutesField(activity.stayMinutes),
-        weather: activity.weather ?? "UNKNOWN",
-      })),
-    })),
-  };
-}
-
-function normalizeTimeField(value?: string) {
-  if (!value) return "09:00";
-  const match = value.match(/^(\d{1,2}):(\d{1,2})$/);
-  if (match) {
-    const hour = clamp(Number(match[1]), 0, 23);
-    const minute = clamp(Number(match[2]), 0, 59);
-    return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
-  }
-  const digits = value.replace(/[^\d]/g, "");
-  if (digits.length >= 3) {
-    const hour = clamp(Number(digits.slice(0, digits.length - 2)), 0, 23);
-    const minute = clamp(Number(digits.slice(-2)), 0, 59);
-    return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
-  }
-  return "09:00";
-}
-
-function normalizeDateField(value?: string) {
-  if (!value) return new Date().toISOString().slice(0, 10);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return new Date().toISOString().slice(0, 10);
-  return parsed.toISOString().slice(0, 10);
-}
-
-function normalizeStayMinutesField(value?: number | null) {
-  if (!Number.isFinite(value ?? NaN)) return undefined;
-  const clamped = Math.max(5, Math.min(Number(value), 1440));
-  return clamped;
-}
-
-function clamp(value: number, min: number, max: number) {
+function clampNumber(value: number, min: number, max: number) {
   if (!Number.isFinite(value)) return min;
   if (value < min) return min;
   if (value > max) return max;
   return value;
 }
+

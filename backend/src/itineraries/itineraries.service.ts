@@ -250,15 +250,21 @@ export class ItinerariesService {
         message: 'Regeneration already running',
       });
 
+    await this.prisma.generationJob.updateMany({
+      where: { itineraryId: id },
+      data: { itineraryId: null },
+    });
+
     const { jobId } = await this.aiService.enqueue(
-      { draftId: itinerary.draftId, targetDays: dto.days },
+      {
+        draftId: itinerary.draftId,
+        targetDays: dto.days,
+        overrideDestinations: dto.destinations,
+        itineraryId: id,
+      },
       userId,
       correlationId,
     );
-    await this.prisma.generationJob.update({
-      where: { id: jobId },
-      data: { itineraryId: id },
-    });
 
     const model = process.env.AI_MODEL ?? 'gemini-pro';
     const envTemp = process.env.AI_TEMPERATURE
@@ -266,13 +272,23 @@ export class ItinerariesService {
       : 0.3;
     const temperature = Number.isFinite(envTemp) ? envTemp : 0.3;
 
+    const auditRequest: Prisma.JsonObject = {
+      itineraryId: id,
+    };
+    if (typeof dto.days === 'number') {
+      auditRequest.targetDays = dto.days;
+    }
+    if (dto.destinations?.length) {
+      auditRequest.destinations = dto.destinations;
+    }
+
     await this.prisma.aiGenerationAudit.create({
       data: {
         id: randomUUID(),
         jobId,
         correlationId,
         prompt: 'regenerate requested',
-        request: { itineraryId: id, targetDays: dto.days },
+        request: auditRequest,
         rawResponse: 'TODO: enqueue to AI pipeline',
         parsed: Prisma.JsonNull,
         status: GenerationJobStatus.QUEUED,

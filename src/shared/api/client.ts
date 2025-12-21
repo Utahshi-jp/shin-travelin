@@ -112,8 +112,9 @@ export const api = {
   },
   getItinerary: (id: string, auth?: AuthTokens) => apiFetch(`/itineraries/${id}`, { auth }),
   updateItinerary: (id: string, body: unknown) => apiFetch(`/itineraries/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
-  regenerateItinerary: (id: string, params: { days: number[]; scenario?: ScenarioSelector }) =>
-    // Backend currently ignores scenario hints; keeping the field client-side lets us extend the payload later without breaking callers.
-    apiFetch<{ jobId: string }>(`/itineraries/${id}/regenerate`, { method: "POST", body: JSON.stringify({ days: params.days }) }),
-  getPrintable: (id: string, auth?: AuthTokens) => apiFetch(`/itineraries/${id}/print`, { auth }),
+  regenerateItinerary: (id: string, params: { days: number[]; destinations?: string[] }) =>
+    apiFetch<{ jobId: string }>(`/itineraries/${id}/regenerate`, {
+      method: "POST",
+      body: JSON.stringify({ days: params.days, destinations: params.destinations }),
+    }),
 };

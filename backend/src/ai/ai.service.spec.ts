@@ -70,7 +70,10 @@ describe('AiService.enqueue', () => {
     expect(pipeline.run).toHaveBeenCalledWith(
       'job-1',
       'corr-1',
-      expect.objectContaining({ model: expect.any(String) }),
+      expect.objectContaining({
+        model: expect.any(String),
+        overrideDestinations: [],
+      }),
     );
     expect(result.status).toBe(GenerationJobStatus.SUCCEEDED);
     expect(result.itineraryId).toBeNull();

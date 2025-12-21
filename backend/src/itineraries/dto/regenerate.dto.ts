@@ -3,7 +3,10 @@ import {
   ArrayMinSize,
   IsArray,
   IsInt,
+  IsOptional,
+  IsString,
   IsUUID,
+  Length,
   Min,
 } from 'class-validator';
 
@@ -17,6 +20,14 @@ export class RegenerateRequestDto {
   @IsInt({ each: true })
   @Min(0, { each: true })
   days!: number[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(5)
+  @IsString({ each: true })
+  @Length(3, 200, { each: true })
+  destinations?: string[];
 }
 
 export class RegenerateDto extends RegenerateRequestDto {
