@@ -8,6 +8,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from './current-user.decorator';
+import type { AuthenticatedUser } from './current-user.decorator';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
@@ -40,7 +41,7 @@ export class AuthController {
    */
   @Get('me')
   @UseGuards(JwtAuthGuard)
-  me(@CurrentUser() user: { id: string }) {
+  me(@CurrentUser() user: AuthenticatedUser) {
     return this.authService.me(user.id);
   }
 }

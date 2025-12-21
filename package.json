@@ -2,12 +2,24 @@
   "name": "shin-travelin",
   "version": "0.1.0",
   "private": true,
-  
   "scripts": {
     "dev": "next dev",
     "dev:api": "npm run start:dev --prefix backend",
     "dev:full": "concurrently \"npm run dev\" \"npm run dev:api\"",
-    "verify:artifact": "node ./scripts/verify-artifact.mjs"
+    "verify:artifact": "node ./scripts/verify-artifact.mjs",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "lint:all": "npm run lint && npm run lint --prefix backend",
+    "test:all": "npm run test && npm run test --prefix backend",
+    "typecheck:backend": "npm run typecheck --prefix backend",
+    "typecheck:all": "npm run typecheck && npm run typecheck:backend",
+    "check:deps:frontend": "madge --ts-config tsconfig.json --extensions ts,tsx --circular src",
+    "check:deps:backend": "madge --ts-config backend/tsconfig.json --extensions ts --circular backend/src",
+    "check:deps": "npm run check:deps:frontend && npm run check:deps:backend",
+    "check:unused": "knip --config knip.json"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -22,14 +34,25 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.2.0",
+    "@testing-library/user-event": "^14.5.2",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/testing-library__jest-dom": "^6.0.0",
     "concurrently": "^9.2.1",
     "eslint": "^9",
     "eslint-config-next": "15.5.7",
+    "eslint-plugin-boundaries": "^4.2.1",
+    "eslint-plugin-import": "^2.31.0",
+    "jsdom": "^27.3.0",
+    "knip": "^5.43.4",
+    "madge": "^8.0.0",
+    "prettier": "^3.4.2",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^2.1.8"
   }
-  
 }

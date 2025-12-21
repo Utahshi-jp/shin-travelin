@@ -1,0 +1,30 @@
+{
+  "$schema": "https://unpkg.com/knip@latest/schema.json",
+  "entry": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "scripts/**/*.mjs"
+  ],
+  "project": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "scripts/**/*.mjs"
+  ],
+  "ignore": [
+    "next-env.d.ts",
+    "next.config.ts",
+    "postcss.config.mjs",
+    "tailwind.config.*"
+  ],
+  "workspaces": {
+    "backend": {
+      "entry": ["backend/src/**/*.ts"],
+      "project": ["backend/src/**/*.ts", "backend/test/**/*.ts"],
+      "ignore": [
+        "backend/src/main.ts",
+        "backend/src/app.module.ts",
+        "backend/src/**/*.d.ts"
+      ]
+    }
+  }
+}

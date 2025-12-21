@@ -1,0 +1,12 @@
+node_modules
+.next
+out
+build
+dist
+coverage
+backend/dist
+backend/node_modules
+**/*.generated.*
+**/*.snap
+pnpm-lock.yaml
+package-lock.json

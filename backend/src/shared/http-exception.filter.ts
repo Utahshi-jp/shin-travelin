@@ -21,11 +21,14 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     if (exception instanceof HttpException) {
       const status = exception.getStatus() as HttpStatus;
-      const res = exception.getResponse();
+      const rawResponse = exception.getResponse();
+      const responseBody = this.asErrorBody(rawResponse);
       const payload: ErrorResponse = {
-        code: (res as any)?.code ?? this.mapStatusToCode(status),
-        message: (res as any)?.message ?? exception.message,
-        details: (res as any)?.details,
+        code: responseBody?.code ?? this.mapStatusToCode(status),
+        message:
+          this.extractMessage(responseBody) ??
+          (typeof rawResponse === 'string' ? rawResponse : exception.message),
+        details: responseBody?.details,
         correlationId,
       };
       this.logger.warn({
@@ -46,6 +49,29 @@ export class HttpExceptionFilter implements ExceptionFilter {
     };
     this.logger.error({ correlationId, error: exception });
     response.status(HttpStatus.INTERNAL_SERVER_ERROR).json(payload);
+  }
+
+  private asErrorBody(
+    input: unknown,
+  ): (Partial<ErrorResponse> & { message?: string | string[] }) | null {
+    if (typeof input === 'object' && input !== null && !Array.isArray(input)) {
+      return input as Partial<ErrorResponse> & { message?: string | string[] };
+    }
+    return null;
+  }
+
+  private extractMessage(
+    body: (Partial<ErrorResponse> & { message?: string | string[] }) | null,
+  ): string | undefined {
+    if (!body) return undefined;
+    const { message } = body;
+    if (typeof message === 'string' && message.trim().length) {
+      return message;
+    }
+    if (Array.isArray(message) && message.length) {
+      return message.map((value) => String(value)).join('; ');
+    }
+    return undefined;
   }
 
   private mapStatusToCode(status: HttpStatus): ErrorCode {
