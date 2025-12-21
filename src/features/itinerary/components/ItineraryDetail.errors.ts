@@ -41,9 +41,9 @@ export function describeTargetDayError(
     };
   }
 
-  const labels = details.invalidIndexes.map((idx) => idx + 1).join(", ");
+  const labels = details.invalidIndexes.map((idx) => `${idx + 1} 日目`).join(", ");
   return {
-    message: `選択した日 (${labels} 日目) が範囲外です。指定可能な日数は 0 〜 ${upperBound} です。`,
+    message: `選択した日 (${labels}) が範囲外です。指定可能な日数は 0 〜 ${upperBound} です。`,
     invalidIndexes: details.invalidIndexes,
   };
 }

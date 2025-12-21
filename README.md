@@ -1,84 +1,109 @@
 # shin-travelin
 
-AI 補助付き旅程作成ツール。Next.js 15 (App Router) と NestJS 11 + Prisma 7 で構成し、docs/ 以下の要件定義・設計書をソースオブトゥルースとして運用します。
+AI を補助にした旅程自動生成ツールです。Next.js 15 (App Router) + NestJS 11 + Prisma 7 + PostgreSQL で構成し、要件/設計は `docs/`（特に detail-design.md）をソース・オブ・トゥルースとして管理します。
 
-## Tech Stack
+## 概要
 
-- Frontend: Next.js 15, React 19, React Hook Form, TanStack Query.
-- Backend: NestJS 11, Prisma 7, PostgreSQL.
-- Infrastructure: Docker Compose for local multi-service boot, scripts/verify-artifact.mjs で成果物検証。
+- 旅行条件（Draft）を保存し、Gemini API を利用して晴天/悪天候ペアの旅程を生成します。
+- 旅程詳細画面では日単位の部分再生成と差分適用、ジョブ状態の可視化を提供します。
+- docs/detail-design.md の CI 方針（lint → test → prisma migrate deploy）に沿って品質ゲートを定義し、CI/ローカルのコマンドを統一しています。
 
-## Repository Layout
+## アーキテクチャ
 
-- docs/: requirements/basic/detail/db/legacy ドキュメント群。
-- src/: Next.js アプリケーション（App Router）。
-- backend/: NestJS + Prisma。`backend/prisma/schema.prisma` が単一の DB スキーマ定義。
-- public/: 静的アセット。
-- scripts/: 補助スクリプト（例: verify-artifact.mjs）。
+- `src/` … Next.js 15 App Router。`features/itinerary` が再生成 UI、`shared/api/client.ts` が API クライアント。
+- `backend/` … NestJS 11 + Prisma 7。`src/ai/ai.service.ts` がジョブ調停、`src/ai/ai.pipeline.ts` が LLM 正規化処理。
+- `docs/` … requirements/basic/detail/db などの設計書。コード変更時はここを先に更新する運用。
+- `docker-compose.yml` … PostgreSQL（デフォルトユーザー `shin/shinpass`）。
+- `scripts/verify-artifact.mjs` … 成果物チェック。
 
-## Getting Started
+## セットアップ
 
-```bash
-# Install dependencies
-npm install
-npm install --prefix backend
+### 前提
 
-# Start backend API
-npm run dev:api
+- Node.js 20.12 以上（CI と同じ）
+- pnpm 10.24（ルート依存関係用）
+- npm 10 以上（backend ディレクトリは独立パッケージのため npm を使用）
+- Docker Desktop（PostgreSQL コンテナ）
 
-# Start frontend (別ターミナル)
-npm run dev
-```
-
-API は http://localhost:4000 、Next.js は http://localhost:3000 で起動します。`.env` と `backend/.env` に API キーや DB URL を設定してください。
-
-## Local Quality Gate
-
-main/PR にマージする前に、CI と同じ品質ゲートをローカルで通過させてください。
+### 手順
 
 ```bash
-# Lint / Typecheck / Test（フロント + バックエンドを一括実行）
-npm run lint:all
-npm run typecheck:all
-npm run test:all
+# 依存関係
+pnpm install
+(cd backend && npm install)
 
-# 依存関係グラフ循環チェック（madge）
-npm run check:deps
+# DB 起動
+docker compose up db -d
 
-# 未使用コード検出（knip）
-npm run check:unused
+# Prisma マイグレーション
+cd backend
+npx prisma migrate deploy
 
-# 成果物検証（docs や schema の欠損防止）
-npm run verify:artifact
+# .env（フロント）
+cat <<'EOF' > .env.local
+NEXT_PUBLIC_API_BASE_URL=http://localhost:4000
+EOF
+
+# backend/.env
+cat <<'EOF' > backend/.env
+DATABASE_URL=postgresql://shin:shinpass@localhost:5432/shintravelin?schema=public
+JWT_SECRET=dev-secret
+GEMINI_API_KEY=your-key-or-blank
+AI_MODEL=gemini-pro
+AI_TEMPERATURE=0.3
+USE_MOCK_GEMINI=true
+EOF
+
+# 開発サーバー（別ターミナルで実行）
+pnpm dev        # Next.js 3000 番
+npm run dev:api # NestJS 4000 番
 ```
 
-`lint:all` / `typecheck:all` / `test:all` は Next.js + NestJS をまとめて検証します。`check:deps` は `src/` と `backend/src/` の循環依存を検出し、`check:unused` は未参照ファイルやエクスポートを洗い出します。
+`USE_MOCK_GEMINI=true` にすると API キーがなくてもモックレスポンスで動作します。実機テスト時は本物のキーを設定してください。
 
-## Continuous Integration
+## 開発コマンド
 
-`.github/workflows/quality-gate.yml` が push / PR (main ブランチ) で走り、上記コマンド＋ backend の `npm run test:e2e` を自動実行します。CI に落ちた場合は同じコマンドをローカルで再現し、原因を修正してから再プッシュしてください。
+| 目的 | コマンド | 備考 |
+| --- | --- | --- |
+| フロント開発サーバー | `pnpm dev` | `http://localhost:3000` |
+| バックエンド開発サーバー | `npm run dev:api` | `http://localhost:4000` |
+| Prisma マイグレーション | `cd backend && npx prisma migrate dev` | スキーマ変更時 |
+| フロント lint | `pnpm lint` | Next.js ESLint |
+| バックエンド lint | `npm run lint --prefix backend` | NestJS ESLint |
+| 単体テスト（front/back） | `pnpm test` / `npm run test --prefix backend` | Vitest / Jest |
+| E2E (backend) | `npm run test:e2e --prefix backend` | Supertest + Jest |
 
-## Artifact Checklist (必須)
+## 品質ゲート（ローカル）
 
-ZIP などで成果物を提出する前に、必要フォルダが含まれているかを自動検証してください。
+目的：CI 落ちを未然に防ぎ、AI 生成コストが絡む変更を安全にリリースするための最小ラインです。原則として **警告も失敗扱い** にし、無視する場合は issue または README で理由を共有してください。
 
 ```bash
-npm run verify:artifact
+pnpm lint:all
+pnpm typecheck:all
+pnpm test:all
+pnpm check:deps
+pnpm check:unused
+pnpm verify:artifact
 ```
 
-欠損がある場合はエラーになります。`docs/requirements.md` や `backend/prisma/schema.prisma` など、レビュアーが前提とするファイルが抜けた状態での提出を防げます。パッケージング時は `git archive -o shin-travelin.zip HEAD` など Git 管理下の内容をそのまま出力する方法を推奨します。
+- `lint:all` / `typecheck:all` / `test:all` は front/back をまとめて検証します。
+- `check:deps` は madge、`check:unused` は knip を使用します。
+- `verify:artifact` は docs / prisma schema など必須ファイルの欠損を検出します。
+- pnpm を利用できない環境では `npm run lint:all` のように npm コマンドへ置き換えても構いません（実行内容は同一です）。
 
-## Testing
+## CI
 
-- Frontend: Vitest + RTL (`npm run test`)。
-- Backend: `npm run test` / `npm run test:e2e` within `backend/`。
+- `.github/workflows/quality-gate.yml` が push / PR (main) で走り、上記品質ゲートと同じコマンドを pnpm で実行します。
+- `prisma migrate deploy` は detail-design.md に沿って **quality gate 通過後に実行する将来ステージ** として予約しており、現状は手動で適用します。
+- CI で失敗した場合は同じコマンドをローカルで再現し、修正後に再 push してください。
 
-## Conventions
+## よくある不具合と対処
 
-- Conventional Commits (`feat:`, `fix:`...)。
-- Cache 制御: `shared/api/client.ts` 経由の fetch は `cache: \"no-store\"` を強制。
-- 認証トークンは Cookie + Authorization header の両方を送信し SSR/CSR で共通化。
+- **API との通信が CORS で失敗する** → `NEXT_PUBLIC_API_BASE_URL` が 4000 番を向いているか、ブラウザの Cookie（`shin_access_token`）が存在するか確認してください。
+- **Gemini 呼び出しが常に失敗する** → `GEMINI_API_KEY` を設定するか、一時的に `USE_MOCK_GEMINI=true` でモック応答に切り替えます。
+- **旅程詳細で再生成対象を選べない** → Draft の日付レンジから外れた `days` を送ると `VALIDATION_ERROR` になります。UI で無効日に黄色ラベルが表示されたら選択を解除してください。
 
-## Support
+## ドキュメント運用
 
-問題があれば issue に記載し、再現手順とログ、`verify:artifact` の結果を添付してください。
+- detail-design.md を更新してからコードを変更します。差分には必ず根拠となるファイルパス (`[backend/src/ai/ai.service.ts](backend/src/ai/ai.service.ts)` など) を追記してください。
+- README は日本語で保守し、初見の開発者が 30 分以内に開発環境を立ち上げられるよう保つことを目標にします。

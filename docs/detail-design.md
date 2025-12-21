@@ -607,6 +607,10 @@ await this.prisma.$transaction(async (tx) => {
      - 実行中ジョブがないことを検査（多重実行防止）
      - `generation_jobs` を `queued` で作成
      - `202 Accepted` で `{ jobId }` を返す
+    - 再生成時に渡される `itineraryId` は Draft 所有者と突き合わせ、Draft に紐付かない旅程 ID は `Forbidden` として即座に拒否する。
+  - `targetDays` は Draft の日数から外れた値を `[0, dayCount)` の範囲チェックで弾き、`invalidIndexes` を含む `VALIDATION_ERROR` を返す。`normalizeTargetDays` 実装: [backend/src/ai/ai.service.ts](backend/src/ai/ai.service.ts)
+  - `overrideDestinations` は前後空白を除去し、重複排除後に最大 5 件へ丸めることで LLM プロンプトを安定化させる。
+  - `promptHash`（draftId + model + temperature + targetDays + overrideDestinations）で同一入力を判定し、`SUCCEEDED` 済みのジョブを再利用して無駄な課金を避ける。
 
 3) **`ai.pipeline.run(job)`（バックエンド内部処理）**
    - 3-1) **Draft 取得**：`draftId` から Draft を取得
@@ -628,6 +632,7 @@ await this.prisma.$transaction(async (tx) => {
      - `generation_jobs` を更新（status / retryCount / partialDays / error 等）
      - `ai_generation_audits` に監査ログを追記
      - `promptHash` を保存し、同じ入力条件での結果再利用を検討可能にする
+   - 実装補足：`AiPipeline` は **晴天/悪天候ペアの時間帯同期**・**POI 多様性**・**行政区レベルの area 補正** を `normalizeDays`～`preventCrossDayPlaceReuse` で一括担保し、正規化後の JSON（`NormalizedItineraryPayload`）のみをサービス層へ返す: [backend/src/ai/ai.pipeline.ts](backend/src/ai/ai.pipeline.ts)
 
 4) **Job 完了（`status=succeeded`）**
    - フロント側は `GET /ai/jobs/:id` のポーリングで `succeeded` を検知
@@ -639,6 +644,7 @@ await this.prisma.$transaction(async (tx) => {
      - `itinerary_days`
      - `activities`（`createMany` でまとめて保存）
      - `itineraries_raws`（`rawJson / promptHash / model` を保存）
+    - 生成ジョブに既存 `itineraryId` が紐づく場合は `replaceItineraryDays` で対象日のみ差し替え、`version` を +1 しつつ `itinerary_raws` を再構築する: [backend/src/itineraries/itinerary.persistence.ts](backend/src/itineraries/itinerary.persistence.ts)
 
 6) **以降の編集**
    - 編集は `PATCH /itineraries/:id` で更新
@@ -661,6 +667,11 @@ await this.prisma.$transaction(async (tx) => {
   - 再試行導線を提示する
 - `partialDays`
   - 成功日 / 失敗日を区別する（UI 表示：成功=緑、未生成/失敗=黄）
+
+補足：
+- `days` パラメータはバックエンド側で Draft の全日数と照合し、範囲外が含まれていれば `details.invalidIndexes` 付き `VALIDATION_ERROR` を返す（`normalizeTargetDays`）。実装: [backend/src/ai/ai.service.ts](backend/src/ai/ai.service.ts)
+- フロントの `ItineraryDetailClient` は API から返る `partialDays`・`VALIDATION_ERROR` を `describeTargetDayError` / `parseTargetDayErrorDetails` で解釈し、再生成モーダル内で無効日を自動解除・ハイライトする。実装: [src/features/itinerary/components/ItineraryDetailClient.tsx](src/features/itinerary/components/ItineraryDetailClient.tsx)
+- `destinationHints` は入力欄で 3–200 文字にバリデーションしたうえで重複排除し、バックエンドの `overrideDestinations` 正規化と同じ制約下に保つ。
 
 ---
 
@@ -726,6 +737,13 @@ await this.prisma.$transaction(async (tx) => {
 
 - 状態管理
   - サーバーデータは React Query を基本とし、**Zustand は編集中のローカル一時状態**（フォーム途中の並び替え等）に限定する。
+
+#### Itinerary 詳細画面の責務分離
+
+- `ItineraryDetailClient` は **コンテナ層**としてポーリング・再生成コマンド・ハイライト状態を管理し、`ItineraryDetailView` に純粋な表示 props を渡す。実装: [src/features/itinerary/components/ItineraryDetailClient.tsx](src/features/itinerary/components/ItineraryDetailClient.tsx)
+- 集計・マトリクス化などの派生計算は `buildScenarioMatrix` / `buildSummary` などヘルパに退避し、UI から計算ロジックを切り離す。実装: [src/features/itinerary/components/ItineraryDetail.helpers.ts](src/features/itinerary/components/ItineraryDetail.helpers.ts)
+- API で得た JSON は `sanitizeItinerary` で欠損フィールドや null を除去し、日別 ID の重複もここで吸収する。実装: [src/features/itinerary/utils/sanitizeItinerary.ts](src/features/itinerary/utils/sanitizeItinerary.ts)
+- scenario/destination ヒントの入力値はコンテナ内で正規化（3–200 文字、最大 5 件）し、再生成 payload でも同じ制約を再利用することで DTO（`RegenerateRequestDto`）との契約ズレを防ぐ。
 
 ---
 
@@ -802,7 +820,9 @@ await this.prisma.$transaction(async (tx) => {
   - `AI_MODEL`
   - `AI_TEMPERATURE`
 - CI パイプライン：
-  - `lint → test → prisma migrate deploy`
+  - `.github/workflows/quality-gate.yml` で `pnpm lint:all → pnpm typecheck:all → pnpm test:all → pnpm check:deps → pnpm check:unused → pnpm verify:artifact` を順に実行し、警告でも失敗扱いにする。
+  - `prisma migrate deploy` は **本番環境に接続できる CI ステージが整い次第** quality gate の後段に追加する方針（現状は手動適用を Runbook で管理）。
+  - README の品質ゲート手順と同一コマンドであることを保証し、ローカル実行と CI の結果が乖離しないようにする。
 - ヘルスチェック：
   - `/health` エンドポイントを提供し、疎通確認およびアプリケーションバージョンを返却する。
 

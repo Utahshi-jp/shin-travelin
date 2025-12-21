@@ -36,6 +36,10 @@ export class AiService {
     private readonly pipeline: AiPipeline,
   ) {}
 
+  /**
+   * Draft/Itinerary の所有権を検証しつつジョブをキューイングする。
+   * targetDays を Draft の日数で正規化し、同一入力は promptHash で再利用する。
+   */
   async enqueue(dto: GenerateDto, userId: string, correlationId: string) {
     const draft = await this.prisma.draft.findUnique({
       where: { id: dto.draftId },
@@ -203,6 +207,10 @@ export class AiService {
     };
   }
 
+  /**
+   * Draft の開始/終了日から日数を算出し、0-based dayIndex のみを許容する。
+   * 範囲外が含まれる場合は invalidIndexes を details に含めて返す。
+   */
   private normalizeTargetDays(
     input: number[] | undefined,
     draft: Pick<JobWithDraft['draft'], 'startDate' | 'endDate'>,
@@ -265,6 +273,10 @@ export class AiService {
     return unique.slice(0, 5);
   }
 
+  /**
+   * 正規化済みの旅程を Itinerary+Days+Activities へ保存する。
+   * 既存 itineraryId がある場合は対象日だけ差し替える。
+   */
   private async persistJobResult(
     jobId: string,
     parsed: NormalizedItineraryPayload,
@@ -390,6 +402,9 @@ export class AiService {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
+  /**
+   * 既存旅程に対する部分再生成適用。対象日のみ差し替え、version/raw を同期する。
+   */
   private async updateExistingItinerary(
     tx: Prisma.TransactionClient,
     job: JobWithDraft,
