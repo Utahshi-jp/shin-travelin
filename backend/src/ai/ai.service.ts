@@ -1,4 +1,5 @@
-import {
+﻿import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -11,13 +12,17 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { ErrorCode } from '../shared/error-codes';
 import { GenerateDto } from './dto/generate.dto';
 import { AiPipeline } from './ai.pipeline';
+import type { NormalizedItineraryPayload } from './ai.pipeline';
 import {
+  PersistActivityInput,
   PersistDayInput,
   persistItineraryGraph,
   replaceItineraryDays,
 } from '../itineraries/itinerary.persistence';
 
-type JobWithDraft = Prisma.GenerationJobGetPayload<{ include: { draft: true } }>;
+type JobWithDraft = Prisma.GenerationJobGetPayload<{
+  include: { draft: true };
+}>;
 
 /**
  * Coordinates GenerationJob lifecycle and prevents concurrent execution for a Draft (AR-6/AR-7).
@@ -63,14 +68,12 @@ export class AiService {
         });
     }
 
+    const targetDays = this.normalizeTargetDays(dto.targetDays, draft);
     const model = process.env.AI_MODEL ?? 'gemini-pro';
     const envTemp = process.env.AI_TEMPERATURE
       ? parseFloat(process.env.AI_TEMPERATURE)
       : 0.3;
     const temperature = Number.isFinite(envTemp) ? envTemp : 0.3;
-    const targetDays = dto.targetDays
-      ? [...dto.targetDays].sort((a, b) => a - b)
-      : [];
     const destinationHints = this.normalizeDestinationHints(
       dto.overrideDestinations,
     );
@@ -151,7 +154,7 @@ export class AiService {
           },
         });
 
-    // Run synchronously for now; queue-backed execution is TODO per detail-design §7.
+    // Run synchronously for now; queue-backed execution is TODO per detail-design ﾂｧ7.
     const result = await this.pipeline.run(job.id, correlationId, {
       model,
       temperature,
@@ -200,6 +203,56 @@ export class AiService {
     };
   }
 
+  private normalizeTargetDays(
+    input: number[] | undefined,
+    draft: Pick<JobWithDraft['draft'], 'startDate' | 'endDate'>,
+  ) {
+    if (!Array.isArray(input) || input.length === 0) return [];
+    const dayCount = this.countDraftDays(draft);
+    if (dayCount <= 0) {
+      throw new BadRequestException({
+        code: ErrorCode.VALIDATION_ERROR,
+        message: 'Draft has no schedulable day range',
+      });
+    }
+
+    const unique = Array.from(new Set(input.map((value) => Math.trunc(value))));
+    const invalid = unique.filter((value) => value < 0 || value >= dayCount);
+    if (invalid.length) {
+      throw new BadRequestException({
+        code: ErrorCode.VALIDATION_ERROR,
+        message: 'targetDays must be within the draft date range',
+        details: {
+          invalidIndexes: invalid,
+          allowedRange: [0, dayCount - 1],
+          dayCount,
+        },
+      });
+    }
+
+    return unique.sort((a, b) => a - b);
+  }
+
+  private countDraftDays(
+    draft: Pick<JobWithDraft['draft'], 'startDate' | 'endDate'>,
+  ) {
+    const start = this.toUtcMidnight(draft.startDate);
+    const end = this.toUtcMidnight(draft.endDate);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
+    if (end < start) return 0;
+    const diff = Math.floor((end - start) / 86400000);
+    return diff + 1;
+  }
+
+  private toUtcMidnight(date?: Date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return NaN;
+    return Date.UTC(
+      date.getUTCFullYear(),
+      date.getUTCMonth(),
+      date.getUTCDate(),
+    );
+  }
+
   private normalizeDestinationHints(input?: string[]) {
     if (!Array.isArray(input)) return [];
     const trimmed = input
@@ -214,24 +267,15 @@ export class AiService {
 
   private async persistJobResult(
     jobId: string,
-    parsed: Prisma.JsonObject,
+    parsed: NormalizedItineraryPayload,
     destinationHints: string[] = [],
   ) {
-    const payload = parsed as { title?: unknown; days?: unknown };
-    const dayArray = Array.isArray(payload.days) ? payload.days : [];
+    const dayArray = parsed.days;
     if (!dayArray.length) return;
 
-    const normalizedDays: PersistDayInput[] = dayArray
-      .filter(
-        (day: any) =>
-          typeof day?.dayIndex === 'number' && typeof day?.date === 'string',
-      )
-      .map((day: any) => ({
-        dayIndex: day.dayIndex,
-        date: day.date,
-        scenario: day.scenario,
-        activities: Array.isArray(day.activities) ? day.activities : [],
-      }));
+    const normalizedDays = dayArray
+      .map((day) => this.toPersistDay(day))
+      .filter((day): day is PersistDayInput => Boolean(day));
 
     if (!normalizedDays.length) return;
 
@@ -250,21 +294,19 @@ export class AiService {
 
         const destinationLabel = destinationHints.length
           ? destinationHints.slice(0, 3)
-          : job.draft.destinations?.slice(0, 3) ?? [];
+          : (job.draft.destinations?.slice(0, 3) ?? []);
         const fallbackTitle = destinationLabel.length
           ? `${destinationLabel.join(', ')} Trip`
           : 'Generated Trip';
-        const title =
-          typeof payload.title === 'string' && payload.title.trim().length
-            ? payload.title.trim()
-            : fallbackTitle;
+        const trimmedTitle = parsed.title.trim();
+        const title = trimmedTitle.length ? trimmedTitle : fallbackTitle;
 
         await persistItineraryGraph(tx, {
           userId: job.draft.userId,
           draftId: job.draftId,
           title,
           days: normalizedDays,
-          rawJson: parsed,
+          rawJson: parsed as Prisma.JsonObject,
           promptHash: job.promptHash,
           model: job.model,
           jobId: job.id,
@@ -278,6 +320,74 @@ export class AiService {
       });
       throw err;
     }
+  }
+
+  private toPersistDay(input: unknown): PersistDayInput | null {
+    if (!this.isRecord(input)) return null;
+    if (typeof input.dayIndex !== 'number' || typeof input.date !== 'string') {
+      return null;
+    }
+    return {
+      dayIndex: input.dayIndex,
+      date: input.date,
+      scenario: typeof input.scenario === 'string' ? input.scenario : undefined,
+      activities: this.normalizePersistActivities(input.activities),
+    };
+  }
+
+  private normalizePersistActivities(input: unknown): PersistActivityInput[] {
+    if (!Array.isArray(input)) return [];
+    return input
+      .map((activity) => this.toPersistActivity(activity))
+      .filter((activity): activity is PersistActivityInput =>
+        Boolean(activity),
+      );
+  }
+
+  private toPersistActivity(input: unknown): PersistActivityInput | null {
+    if (!this.isRecord(input)) return null;
+    const time = this.coerceString(input.time);
+    const area = this.coerceString(input.area);
+    const category = this.coerceString(input.category);
+    const description = this.coerceString(input.description);
+    if (!time || !area || !category || !description) {
+      return null;
+    }
+    return {
+      time,
+      area,
+      category,
+      description,
+      placeName: this.coerceOptionalString(input.placeName),
+      stayMinutes: this.coerceOptionalNumber(input.stayMinutes),
+      weather: this.coerceOptionalString(input.weather),
+      orderIndex: this.coerceOptionalNumber(input.orderIndex),
+    };
+  }
+
+  private coerceString(value: unknown): string | undefined {
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    return trimmed.length ? trimmed : undefined;
+  }
+
+  private coerceOptionalString(value: unknown): string | undefined {
+    return this.coerceString(value);
+  }
+
+  private coerceOptionalNumber(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string' && value.trim().length) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return undefined;
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
   private async updateExistingItinerary(
@@ -303,10 +413,7 @@ export class AiService {
       where: { id: itineraryId },
       include: {
         days: {
-          orderBy: [
-            { dayIndex: 'asc' },
-            { scenario: 'asc' },
-          ],
+          orderBy: [{ dayIndex: 'asc' }, { scenario: 'asc' }],
           include: {
             activities: {
               orderBy: { orderIndex: 'asc' },

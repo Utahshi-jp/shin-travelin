@@ -1,0 +1,55 @@
+name: Quality Gate
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  NODE_VERSION: "20.12.1"
+  PNPM_VERSION: "10.24.0"
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "pnpm"
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Lint (frontend + backend)
+        run: pnpm lint:all
+
+      - name: Type check (frontend + backend)
+        run: pnpm typecheck:all
+
+      - name: Run unit tests (frontend + backend)
+        run: pnpm test:all
+
+      - name: Check dependency graph
+        run: pnpm check:deps
+
+      - name: Detect unused code
+        run: pnpm check:unused
+
+      - name: Verify required artifacts
+        run: pnpm verify:artifact

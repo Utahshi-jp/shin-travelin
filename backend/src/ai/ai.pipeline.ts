@@ -33,7 +33,7 @@ type RunOptions = {
   overrideDestinations?: string[];
 };
 
-type NormalizedActivity = {
+export type NormalizedActivity = {
   time: string;
   area: string;
   placeName?: string;
@@ -44,7 +44,7 @@ type NormalizedActivity = {
   orderIndex: number;
 };
 
-type NormalizedDay = {
+export type NormalizedDay = {
   dayIndex: number;
   date: string;
   scenario: DayScenario;
@@ -55,6 +55,18 @@ type NormalizedDayResult = {
   days: NormalizedDay[];
   llmDayCount: number;
   llmDayIndexes: number[];
+};
+
+export type NormalizedItineraryPayload = {
+  title: string;
+  days: NormalizedDay[];
+};
+
+export type AiPipelineRunResult = {
+  status: GenerationJobStatus;
+  partialDays: number[];
+  parsed?: NormalizedItineraryPayload;
+  error?: string | ErrorCode;
 };
 
 type DestinationKind = 'ADMIN_AREA' | 'LANDMARK';
@@ -356,12 +368,14 @@ export class AiPipeline {
     return `${basePrompt}\nPrevious output failed because: ${lastError}. Please regenerate valid JSON that matches: ${expectedSchema}`;
   }
 
-  private parseJsonWithRepair(text: string) {
+  private parseJsonWithRepair(text: string): unknown {
     // First try strict JSON; if it fails, attempt a light repair (common: unterminated string, trailing commas).
     try {
-      return JSON.parse(text);
+      const parsed: unknown = JSON.parse(text);
+      return parsed;
     } catch {
-      return JSON.parse(jsonrepair(text));
+      const repaired: unknown = JSON.parse(jsonrepair(text));
+      return repaired;
     }
   }
 
@@ -1857,7 +1871,11 @@ export class AiPipeline {
     return flattened;
   }
 
-  async run(jobId: string, correlationId: string, options: RunOptions) {
+  async run(
+    jobId: string,
+    correlationId: string,
+    options: RunOptions,
+  ): Promise<AiPipelineRunResult> {
     // Mark running before performing LLM call; this ensures status is accurate even if downstream fails。
     const job = await this.prisma.generationJob.update({
       where: { id: jobId },
@@ -1909,9 +1927,9 @@ export class AiPipeline {
         );
         const cleaned = stripCodeFence(providerResult.rawText);
 
-        let parsedJson: any;
+        let parsedValue: unknown;
         try {
-          parsedJson = this.parseJsonWithRepair(cleaned);
+          parsedValue = this.parseJsonWithRepair(cleaned);
         } catch (parseErr) {
           lastError = `parse_error: ${(parseErr as Error).message}`;
           await this.writeAudit(jobId, correlationId, {
@@ -1932,8 +1950,9 @@ export class AiPipeline {
           continue;
         }
 
-        const baseResult = itinerarySchema.safeParse(parsedJson);
-        const dayCandidates = this.extractDayCandidates(parsedJson?.days);
+        const baseResult = itinerarySchema.safeParse(parsedValue);
+        const parsedObject = this.asRecord(parsedValue);
+        const dayCandidates = this.extractDayCandidates(parsedObject?.days);
         const normalization = this.normalizeDays(dayCandidates, {
           draft,
           totalDates,
@@ -1980,12 +1999,13 @@ export class AiPipeline {
             ),
           ),
         ).sort((a, b) => a - b);
-        const parsed: Prisma.JsonObject = {
+        const parsedPayload: NormalizedItineraryPayload = {
           title: baseResult.success
             ? baseResult.data.title
-            : (parsedJson.title ?? 'untitled'),
+            : (this.extractString(parsedObject?.title) ?? 'untitled'),
           days: validDays,
-        } as Prisma.JsonObject;
+        };
+        const parsedJsonValue = parsedPayload as Prisma.InputJsonValue;
 
         const status = allDaysValid
           ? GenerationJobStatus.SUCCEEDED
@@ -2004,7 +2024,7 @@ export class AiPipeline {
                 typeof providerResult.rawResponse === 'string'
                   ? providerResult.rawResponse
                   : JSON.stringify(providerResult.rawResponse),
-              parsed,
+              parsed: parsedJsonValue,
               status,
               retryCount: attempt,
               model: options.model,
@@ -2028,7 +2048,7 @@ export class AiPipeline {
         return {
           status,
           partialDays,
-          parsed,
+          parsed: parsedPayload,
           error: errorMessage ?? undefined,
         };
       } catch (err) {
@@ -2097,16 +2117,36 @@ export class AiPipeline {
     ]);
 
     this.logger.error({ jobId, correlationId, error: finalError });
-    return { status: GenerationJobStatus.FAILED, error: finalError };
+    return {
+      status: GenerationJobStatus.FAILED,
+      partialDays: [],
+      error: finalError,
+    };
   }
 
   private extractDayCandidates(input: unknown): unknown[] {
     if (Array.isArray(input)) return input;
-    if (input && typeof input === 'object') {
+    if (this.isRecord(input)) {
       // Why: Gemini が { "day0": {...}, "day1": {...} } のような連想オブジェクトを返すことがあり得るため値を配列化する。
-      return Object.values(input as Record<string, unknown>);
+      return Object.values(input);
     }
     return [];
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> | null {
+    if (this.isRecord(value)) return value;
+    return null;
+  }
+
+  private extractString(value: unknown): string | undefined {
+    if (typeof value === 'string' && value.trim().length) {
+      return value.trim();
+    }
+    return undefined;
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
   private async writeAudit(

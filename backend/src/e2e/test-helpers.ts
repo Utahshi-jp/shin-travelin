@@ -14,6 +14,25 @@ const pool = new Pool({ connectionString: datasourceUrl });
 const adapter = new PrismaPg(pool);
 
 export const prisma = new PrismaClient({ adapter });
+type SupertestTarget = Parameters<typeof request>[0];
+
+const getHttpServer = (app: INestApplication): SupertestTarget => {
+  const rawServer: unknown = app.getHttpServer();
+  return rawServer as SupertestTarget;
+};
+
+const readStringField = (body: unknown, key: string): string | null => {
+  if (
+    body &&
+    typeof body === 'object' &&
+    !Array.isArray(body) &&
+    typeof (body as Record<string, unknown>)[key] === 'string'
+  ) {
+    return (body as Record<string, string>)[key];
+  }
+  return null;
+};
+
 export async function connectPrisma() {
   await prisma.$connect();
 }
@@ -59,11 +78,16 @@ export async function loginAndGetToken(
   email: string,
   password: string,
 ) {
-  const res = await request(app.getHttpServer())
+  const server = getHttpServer(app);
+  const res = await request(server)
     .post('/auth/login')
     .send({ email, password })
     .expect(200);
-  return res.body.accessToken as string;
+  const token = readStringField(res.body, 'accessToken');
+  if (!token) {
+    throw new Error('loginAndGetToken missing accessToken in response');
+  }
+  return token;
 }
 
 export async function createDraft(app: INestApplication, token: string) {
@@ -86,7 +110,8 @@ export async function createDraft(app: INestApplication, token: string) {
     },
   };
 
-  const res = await request(app.getHttpServer())
+  const server = getHttpServer(app);
+  const res = await request(server)
     .post('/drafts')
     .set('Authorization', `Bearer ${token}`)
     .send(payload);
@@ -96,7 +121,11 @@ export async function createDraft(app: INestApplication, token: string) {
       `createDraft failed status=${res.status} body=${JSON.stringify(res.body)}`,
     );
   }
-  return res.body.id as string;
+  const draftId = readStringField(res.body, 'id');
+  if (!draftId) {
+    throw new Error('createDraft did not return draft id');
+  }
+  return draftId;
 }
 
 export async function createSucceededJob(draftId: string) {

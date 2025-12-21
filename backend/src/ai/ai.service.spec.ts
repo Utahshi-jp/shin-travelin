@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
@@ -79,6 +80,34 @@ describe('AiService.enqueue', () => {
     expect(result.itineraryId).toBeNull();
   });
 
+  it('normalizes and deduplicates targetDays before invoking pipeline', async () => {
+    const prisma = makePrisma();
+    prisma.generationJob.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
+
+    const pipeline = {
+      run: jest.fn().mockResolvedValue({
+        status: GenerationJobStatus.SUCCEEDED,
+        partialDays: [],
+        parsed: { days: [] },
+      }),
+    } as any;
+
+    const service = new AiService(prisma, pipeline);
+    await service.enqueue(
+      { draftId: draft.id, targetDays: [2, 0, 2] } as any,
+      draft.userId,
+      'corr-sort',
+    );
+
+    expect(pipeline.run).toHaveBeenCalledWith(
+      'job-1',
+      'corr-sort',
+      expect.objectContaining({ targetDays: [0, 2] }),
+    );
+  });
+
   it('throws Conflict when a job is already queued/running', async () => {
     const prisma = makePrisma();
     prisma.generationJob.findFirst.mockResolvedValueOnce({ id: 'running-job' });
@@ -114,5 +143,20 @@ describe('AiService.enqueue', () => {
     await expect(
       service.enqueue({ draftId: 'missing' } as any, draft.userId, 'corr-4'),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('throws BadRequest when targetDays exceed draft range', async () => {
+    const prisma = makePrisma();
+    const pipeline = { run: jest.fn() } as any;
+    const service = new AiService(prisma, pipeline);
+
+    await expect(
+      service.enqueue(
+        { draftId: draft.id, targetDays: [99] } as any,
+        draft.userId,
+        'corr-5',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(pipeline.run).not.toHaveBeenCalled();
   });
 });
