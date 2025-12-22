@@ -2,12 +2,22 @@ import { draftFormSchema, type DraftFormValues } from "@/shared/validation/draft
 import { itinerarySchema, type ItineraryFormValues } from "@/shared/validation/itinerary.schema";
 import { z } from "zod";
 
+/**
+ * Next.js から NestJS API への単一経路。SSR/CSR 双方で fetch を統一し、
+ * スキーマ破壊を Zod で即座に検出する。
+ */
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
+/**
+ * 晴雨どちらのシナリオを対象に再生成するかを示す UI 側セレクタ。
+ */
 export type ScenarioSelector = "BOTH" | "SUNNY" | "RAINY";
 
 type ErrorBody = { code: string; message: string; details?: unknown; correlationId?: string };
 
+/**
+ * API から返る `code/message/correlationId` を保持し、UI 側で一貫したエラー表示を可能にする。
+ */
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -117,6 +127,10 @@ async function safeParseJson(response: Response) {
   }
 }
 
+/**
+ * fetch の薄いラッパー。常に `credentials: include`、`cache: "no-store"` を付与し、
+ * エラー時は ApiError を投げてコンポーネントからの try/catch を単純化する。
+ */
 async function apiFetch<T = unknown>(path: string, init?: ApiFetchInit<T>): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     ...init,
@@ -140,6 +154,9 @@ async function apiFetch<T = unknown>(path: string, init?: ApiFetchInit<T>): Prom
   return (payload ?? undefined) as T;
 }
 
+/**
+ * 画面層で直接呼び出す REST API。各エンドポイントは入力/出力とも Zod で検証済み。
+ */
 export const api = {
   getHealth: (auth?: AuthTokens) => apiFetch("/health", { auth, schema: z.object({ status: z.string() }) }),
   register: (body: { email: string; password: string; displayName: string }) =>

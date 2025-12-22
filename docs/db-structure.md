@@ -16,37 +16,31 @@
 - 関連: 1:N Draft, 1:N Itinerary。
 
 ### 2.2 Draft
-- 目的: 入力スナップショット。生成ジョブや旅程の起点。
-- 列:  
   `id`, `userId` FK, `origin`, `destinations`(string[]),  
   `startDate`, `endDate`, `budget`, `purposes`(string[]),  
-  `notes?`, `status`(ACTIVE/EXPIRED), `createdAt`。
+  `memo?`, `status`(ACTIVE/EXPIRED), `createdAt`, `updatedAt`。
 - 関連: 1:1 CompanionDetail、1:N GenerationJob、1:N Itinerary。
-- 制約: `CHECK (startDate <= endDate)` を推奨。
 
 ### 2.3 CompanionDetail
 - 目的: 同行者情報の正規化。
 - 列:  
-  `id`, `draftId`(UNIQUE FK),  
-  各同行者カウント（Int, default 0）。
 
 ### 2.4 GenerationJob
-- 目的: AI 生成ジョブ管理。
 - 列:  
   `id`, `draftId` FK,  
   `status`(QUEUED/RUNNING/SUCCEEDED/FAILED),  
-  `targetDays`(int[]), `model`, `temperature`, `promptHash`,  
-  `retryCount`, `startedAt?`, `finishedAt?`, `itineraryId?`。
+  `retryCount`(default 0), `partialDays`(int[] default []), `targetDays`(int[] default []),  
 - 関連:  
   - 1:N AiGenerationAudit  
-  - Itinerary と任意の 1:1（生成結果との紐付け）
+  - Itinerary との任意の 1:1（生成結果との紐付け、`itineraryId` UNIQUE）
 
 ### 2.5 AiGenerationAudit
 - 目的: LLM 呼び出しと応答の監査ログ。
 - 列:  
   `id`, `jobId` FK, `correlationId`,  
-  `request`(jsonb), `rawResponse`(text), `parsed`(jsonb?),  
-  `status`, `retryCount`, `errorMessage?`, `createdAt`。
+  `prompt?`, `request`(jsonb?), `rawResponse`(text?), `parsed`(jsonb?),  
+  `status`, `retryCount`(default 0), `errorMessage?`, `model?`, `temperature?`,  
+  `createdAt`, `updatedAt`。
 - 運用:
   - DELETE 禁止
   - `createdAt` による月次パーティションを検討
@@ -57,34 +51,40 @@
   `id`, `userId` FK, `draftId` FK,
   `title`, `version`(楽観ロック),
   `createdAt`, `updatedAt`。
-- 関連: 1:N ItineraryDay、1:1 ItineraryRaw。
+- 関連: 1:N ItineraryDay、1:1 ItineraryRaw、GenerationJob との任意の 1:1（`GenerationJobItinerary` リレーション）。
 
 ### 2.7 ItineraryDay
 - 目的: 旅程の 1 日単位表現。
 - 列:  
   `id`, `itineraryId` FK,  
-  `dayIndex`(0-based), `date`(Date), `createdAt`。
+  `dayIndex`(0-based), `date`(Date), `scenario`(DayScenario, default SUNNY), `createdAt`, `updatedAt`。
 - 制約:  
-  `UNIQUE(itineraryId, dayIndex)`。
+  `UNIQUE(itineraryId, dayIndex, scenario)`。
 
 ### 2.8 Activity
 - 目的: 1 日の中のアクティビティ。
 - 列:  
   `id`, `itineraryDayId` FK,  
-  `time`(HH:mm), `location`, `content`,  
-  `url?`, `weather`(enum), `orderIndex`。
+  `time`(HH:mm), `area`, `placeName?`,  
+  `category`(SpotCategory), `description`, `stayMinutes?`,
+  `weather`(Weather), `orderIndex`, `createdAt`, `updatedAt`。
 - 制約:
-  - `CHECK (char_length(location) BETWEEN 1 AND 200)`
   - `CHECK (time ~ '^[0-2][0-9]:[0-5][0-9]$')`
+  - `UNIQUE(itineraryDayId, orderIndex)` で並び順を固定
 
-### 2.9 ItineraryRaw
+-### 2.9 ItineraryRaw
 - 目的: LLM 生成の元 JSON を保持し、再解析・監査を可能にする。
 - 列:  
   `id`, `itineraryId`(UNIQUE FK),  
-  `rawJson`(jsonb), `model`, `promptHash`, `createdAt`。
+  `rawJson`(jsonb), `model`, `promptHash`, `createdAt`, `updatedAt`。
 - 制約:
   - `CHECK (jsonb_typeof(rawJson) = 'object')`
   - `promptHash` NOT NULL
+
+### 2.10 Enum 定義
+- `Weather`: `SUNNY`, `RAINY`, `CLOUDY`, `UNKNOWN`
+- `DayScenario`: `SUNNY`, `RAINY`
+- `SpotCategory`: `FOOD`, `SIGHTSEEING`, `MOVE`, `REST`, `STAY`, `SHOPPING`, `OTHER`
 
 
 ## 3. リレーションと整合性（最終）
@@ -111,7 +111,7 @@
 ### Draft
 - インデックス:
   - `(userId)`
-  - `(status, createdAt DESC)`
+  - `(status, createdAt)`
 
 ### GenerationJob
 - インデックス:
@@ -119,23 +119,24 @@
   - `(status)`
 - 一意制約（冪等・再利用用）:
   - `UNIQUE(draftId, model, temperature, promptHash)`
+  - `UNIQUE(itineraryId)`
 - CHECK 制約:
   - `CHECK (retryCount >= 0)`
 
 ### Itinerary
 - インデックス:
-  - `(userId, createdAt DESC)`
+  - `(userId, createdAt)`
   - `(draftId)`
-  - `(status)`
-  - `(version)`
 
 ### ItineraryDay
 - 制約:
-  - `UNIQUE(itineraryId, dayIndex)`
+  - `UNIQUE(itineraryId, dayIndex, scenario)`
 
 ### Activity
 - インデックス:
   - `(itineraryDayId, orderIndex)`
+- 制約:
+  - `UNIQUE(itineraryDayId, orderIndex)`
 
 ### ItineraryRaw
 - CHECK 制約:
@@ -145,6 +146,8 @@
 - 運用制約:
   - `createdAt` での **月次パーティション化を検討**
   - DELETE / TRUNCATE 禁止（監査要件）
+- インデックス:
+  - `(jobId, createdAt)`
 
 ## 5. 移行と運用メモ
 

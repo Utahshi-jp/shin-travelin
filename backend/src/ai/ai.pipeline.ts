@@ -292,6 +292,10 @@ export function stripCodeFence(text: string): string {
 }
 
 @Injectable()
+/**
+ * LLM 応答を正規化し、現実的な POI/シナリオ条件を満たすまで自己修復するパイプライン。
+ * - プロンプト生成 → LLM 呼び出し → JSON 修復 → Days/Activities 正規化を一気通貫で担う。
+ */
 export class AiPipeline {
   private readonly logger = new Logger(AiPipeline.name);
 
@@ -389,6 +393,10 @@ export class AiPipeline {
     return dates;
   }
 
+  /**
+   * LLM が返した days 配列をシナリオペア単位で同期させ、
+   * 欠損分はカタログ/テンプレートで補完する。
+   */
   private normalizeDays(
     days: unknown[],
     context: {

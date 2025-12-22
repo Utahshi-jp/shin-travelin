@@ -42,7 +42,7 @@
 | FR-1 | MUST | `/` | 入力制約：出発地（3–200文字）、目的地（1–5件・各3–200文字）、開始日≦終了日（最大3年以内）、予算（5,000–5,000,000円）、旅行目的（1–5件）、メモ（最大500文字）、同行者人数（各カテゴリ0–20人）。入力エラーは**該当フィールド直下に表示**し、送信時は**最初のエラーフィールドへ自動スクロール**する。 |
 | FR-2 | MUST | `/` | 送信時は**ログイン必須**。送信中は入力欄およびボタンを無効化し、ローディング表示を行う。生成開始後は `/itineraries/[id]?jobId=...` へ遷移する。 |
 | FR-3 | MUST | `/itineraries` | SSR による旅程一覧表示を行う。データが存在しない場合は空状態 UI を表示する。エラー発生時は再取得（リトライ）導線を提供する。検索条件・ページング状態は URL クエリとして保持する。 |
-| FR-4 | MUST | `/itineraries/[id]` | 表示内容：タイトル（1–120文字）、日付、Activity（時刻・場所・内容・任意URL・天気）。保存時は PATCH を使用し **version を必須**とする。409 発生時は最新データを再取得し、**編集差分をユーザーに提示**する。再生成された部分は視覚的に区別（色分け）して表示する。 |
+| FR-4 | MUST | `/itineraries/[id]` | 表示内容：タイトル（1–120文字）、日付、Activity（時刻・エリア・placeName・カテゴリ・内容・滞在目安・天気）。保存時は PATCH を使用し **version を必須**とする。409 発生時は最新データを再取得し、**編集差分をユーザーに提示**する。再生成された部分は視覚的に区別（色分け）して表示する。 |
 | FR-5 | SHOULD | `/itineraries/[id]` | 指定した日（dayIndex 配列）単位で部分再生成を行う（API: `POST /itineraries/:id/regenerate`）。生成処理中は再実行不可とする。結果は **生成成功：緑 / 未生成・失敗：黄** として状態を可視化する。 |
 | FR-6 | COULD | `/itineraries/[id]/print` | 読み取り専用の印刷向けビューを提供する。OG（SNS共有）対応。編集操作は不可。 |
 | FR-7 | MUST | 共通 | アクセシビリティ対応：label-for、aria 属性、フォーカス管理を実装する。**キーボード操作のみで入力・送信・保存が完結可能**であること。 |
@@ -60,7 +60,7 @@
 | AR-5 | MUST | GET `/drafts/:id` | リクエストユーザーと所有者が一致 | 不存在は 404、権限不一致は 403、未認証は 401 を返却する。 |
 | AR-6 | MUST | POST `/ai/generate` | Draft の所有者であり、生成処理が未実行 | 生成ジョブをキューに登録する。202 `{ jobId, status }` を返却する。 |
 | AR-7 | MUST | GET `/ai/jobs/:id` | 有効な jobId | 200 `{ status, retryCount, partialDays, error? }` を返却する。 |
-| AR-8 | MUST | POST `/itineraries` | 対象 job が成功状態 | Itinerary と生成元データ（Raw）を保存する。初期 version は 1。 |
+| AR-8 | MUST | GenerationJob 成功時（`ai.pipeline` 内部処理）※ `POST /itineraries` は 410 を返却 | 対象 job が `succeeded` | サービス側で Itinerary / ItineraryRaw / Audit を自動保存し、初期 version=1 で確定する。フロントエンドからの手動 POST は不要。 |
 | AR-9 | MUST | PATCH `/itineraries/:id` | version が最新 | 更新成功時は version をインクリメント。不一致時は 409。 |
 | AR-10 | MUST | POST `/itineraries/:id/regenerate` | 他の生成ジョブが未実行 | 再生成ジョブを開始し 202 `{ jobId }` を返却。競合時は 409。 |
 | AR-11 | MUST | GET `/itineraries/:id/print` | 認可済みユーザー | 印刷用の読み取り専用 DTO を返却する。 |
@@ -73,7 +73,7 @@
 |----|------|------|
 | DB-1 | MUST | 正規化構成：User / Draft / CompanionDetail（1対1）/ GenerationJob / Itinerary / ItineraryDay / Activity / ItineraryRaw（1対1）/ AiGenerationAudit（1対多）。 |
 | DB-2 | MUST | インデックス：Itinerary（userId, createdAt DESC）、GenerationJob（draftId, status）、Draft（createdAt）、Audit（jobId, createdAt）。 |
-| DB-3 | MUST | 生成監査ログとして、prompt・request・response・raw・parsed・retryCount・status・error・model・temperature・correlationId を保存する。 |
+| DB-3 | MUST | 生成監査ログとして、prompt・request（JSON）・rawResponse（テキスト）・parsed（JSON）・retryCount・status・errorMessage・model・temperature・correlationId を保存する。 |
 | DB-4 | SHOULD | Draft は 7 日経過後に EXPIRED とし、定期ジョブで削除する。GenerationJob / Itinerary / Audit は保持対象とする。 |
 | DB-5 | COULD | 同じ入力で繰り返し実行しても結果が変わらないよう、draftId + promptHash + model + temperature に一意制約を設け、再生成時に既存結果を再利用できるようにする。 目的は LLM コスト削減と不要な再生成防止である。 |
 

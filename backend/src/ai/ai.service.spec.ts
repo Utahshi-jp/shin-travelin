@@ -56,7 +56,7 @@ describe('AiService.enqueue', () => {
       run: jest.fn().mockResolvedValue({
         status: GenerationJobStatus.SUCCEEDED,
         partialDays: [0],
-        parsed: {},
+        parsed: { days: [] },
       }),
     } as any;
 

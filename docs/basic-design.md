@@ -174,7 +174,7 @@ flowchart LR
   - 編集操作はクライアントコンポーネントで行う。
   - 編集可能項目：
     - タイトル（1–120文字）
-    - Activity（時刻 / 場所 / 内容 / 任意 URL / 天気）
+    - Activity（時刻 / エリア / placeName / カテゴリ / 内容 / 滞在目安 / 天気）
   - 日付情報は表示専用とし、編集不可とする。
   - 保存時は PATCH API を使用し、**version を必須とする楽観的ロック**を行う。
   - 部分再生成は対象日（day 配列）を指定して実行し、生成ジョブの状態をポーリングで取得する。
@@ -341,7 +341,7 @@ flowchart LR
 
 | Method | Path | 入力 | 前提条件 | 事後条件 / 正常系 | 主なエラー |
 |------|------|------|----------|------------------|-----------|
-| POST | `/itineraries` | draftId, jobId, title, days[] | GenerationJob が succeeded | Itinerary / ItineraryRaw / Audit を保存する | 409: job 未完 |
+| POST | `/itineraries` | – | – | ※ 生成完了後は `ai.pipeline` が Itinerary / ItineraryRaw / Audit を自動保存するため、このエンドポイントは 410 を返却（手動作成不可） | 410 |
 | GET | `/itineraries` | page, query | 認証済み | ページングされた一覧を返却 | 401 |
 | PATCH | `/itineraries/:id` | title, days, version | 所有者かつ version 一致 | version を +1 して更新する | 409: 競合 |
 | POST | `/itineraries/:id/regenerate` | days[] | 所有者、実行中なし | 再生成ジョブを開始し `{ jobId }` を返却 | 409: 実行中 |
@@ -392,7 +392,7 @@ erDiagram
 ### 5.2 主な制約
 | 対象            | 制約内容                                          |
 | ------------- | --------------------------------------------- |
-| ItineraryDay  | `(itineraryId, dayIndex)` の組み合わせをユニークとする      |
+| ItineraryDay  | `(itineraryId, dayIndex, scenario)` の組み合わせをユニークとする      |
 | Activity      | `(itineraryDayId, orderIndex)` の組み合わせをユニークとする |
 | Itinerary     | `version` は整数型とし、更新ごとに `+1` される               |
 | GenerationJob | 同一 Draft に対し、実行中（`queued` / `running`）は 1 件のみ |
@@ -402,9 +402,9 @@ erDiagram
 | テーブル              | カラム       | 用途                      |
 | ----------------- | --------- | ----------------------- |
 | ItineraryRaw      | `rawJson` | LLM から返却された生の生成結果（正規化前） |
-| AiGenerationAudit | `requestJson`  | LLM 呼び出しリクエスト（入力） |
-| AiGenerationAudit | `responseJson` | LLM 応答（出力・生データ） |
-| AiGenerationAudit | `parsedJson`   | 構造検証・修復後のデータ |
+| AiGenerationAudit | `request`  | LLM 呼び出しリクエスト（入力） |
+| AiGenerationAudit | `rawResponse` | LLM 応答（出力・生データ） |
+| AiGenerationAudit | `parsed`   | 構造検証・修復後のデータ |
 
 ### 5.4 インデックス設計
 | テーブル              | インデックス                     | 目的            |

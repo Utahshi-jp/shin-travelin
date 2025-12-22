@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+/**
+ * 旅程詳細を UI で編集する際のソース・オブ・トゥルース。
+ * Prisma DTO と突合するため、days/activities すべてをここで検証する。
+ */
 const spotCategorySchema = z.enum(["FOOD", "SIGHTSEEING", "MOVE", "REST", "STAY", "SHOPPING", "OTHER"]);
 
 const activitySchema = z.object({
@@ -23,6 +27,9 @@ const activitySchema = z.object({
   orderIndex: z.number().min(0),
 });
 
+/**
+ * API から受け取る旅程 JSON の完全スキーマ。編集フォーム・再生成リクエストで再利用する。
+ */
 export const itinerarySchema = z.object({
   id: z.string(),
   title: z.string().min(1).max(120),
