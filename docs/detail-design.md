@@ -328,22 +328,15 @@
 
 #### POST `/itineraries`
 - **入力**
-  - `{ draftId, jobId, title(1–120), days: Day[] }`
-  - `Day`
-    - `{ date: ISO8601, activities: Activity[] }`
-  - `Activity`
-    - `{ time: HH:mm, area(1–200), placeName?: string(<=200), category: SpotCategory, description(1–500), stayMinutes?: number(5–1440), weather: enum }`
-- **前提**
-  - 指定した `jobId` の status が `succeeded`
+  - –（MVP では手動保存を行わない）
+- **処理**
+  - 生成ジョブが `succeeded` になると `ai.pipeline.persistItineraryGraph` が `Itinerary / ItineraryDay / Activity / ItineraryRaw / AiGenerationAudit` を**自動保存**する。
+  - ユーザーがこのエンドポイントを呼び出した場合は、自動保存のみ提供している旨を示す `410 Gone` を返却する。
 - **出力**
-  - `201 Created`
-  - `{ id, version: 1 }`
+  - `410 Gone`
+  - `{ code: 'ITINERARY_AUTOMATION_ONLY', message: 'Itineraries are persisted automatically after generation.' }`
 - **エラー**
-  - `409` job 未完了
-  - `400` バリデーションエラー（Zod / class-validator）
-  - `401` 未認証
-  - `403` 権限不一致
-  - `500` 内部エラー
+  - `410`（固定）。将来手動保存を再開する場合に備えてルートのみ予約している。
 
 #### PATCH `/itineraries/:id`
 - **入力**
@@ -434,6 +427,14 @@ Draft と **1 対 1** の関係。
 - `status` : enum（`queued | running | succeeded | failed`）
 - `retryCount` : int
 - `partialDays` : int[]（成功した dayIndex のみ）
+- `targetDays` : int[]（リクエストされた dayIndex）
+- `model` : string?
+- `temperature` : float?
+- `promptHash` : string?（draft + destinations + model 等のハッシュ）
+- `startedAt` : DateTime?
+- `finishedAt` : DateTime?
+- `itineraryId` : UUID?（再生成で既存行程に紐づく場合）
+- `error` : string?（失敗理由の要約）
 - `createdAt` : DateTime
 - `updatedAt` : DateTime
 
@@ -445,15 +446,17 @@ Draft と **1 対 1** の関係。
 - `id` : UUID（PK）
 - `jobId` : UUID（FK → generation_jobs.id）
 - `prompt` : text
-- `requestJson` : JSONB
-- `responseJson` : JSONB
-- `status` : enum
-- `errorMessage` : string?（nullable）
-- `model` : string
-- `temperature` : float
+- `request` : JSONB（LLM 呼び出しリクエスト）
+- `rawResponse` : text（LLM 応答の生文字列）
+- `parsed` : JSONB（構造検証・修復後）
+- `status` : enum（GenerationJobStatus）
 - `retryCount` : int
+- `errorMessage` : string?（nullable）
+- `model` : string?
+- `temperature` : float?
 - `correlationId` : string
 - `createdAt` : DateTime
+- `updatedAt` : DateTime
 
 LLM 呼び出しの **完全監査ログ**。削除禁止。
 
@@ -477,10 +480,12 @@ LLM 呼び出しの **完全監査ログ**。削除禁止。
 - `itineraryId` : UUID（FK → itineraries.id）
 - `date` : Date
 - `dayIndex` : int
+- `scenario` : enum（`SUNNY` / `RAINY`）
 - `createdAt` : DateTime
+- `updatedAt` : DateTime
 
 制約：
-- `(itineraryId, dayIndex)` を **ユニーク**
+- `(itineraryId, dayIndex, scenario)` を **ユニーク**（晴天 / 悪天候ペアを区別）
 
 ---
 
@@ -527,16 +532,17 @@ LLM 呼び出しの **完全監査ログ**。削除禁止。
 - `promptHash` : string
 - `model` : string
 - `createdAt` : DateTime
+- `updatedAt` : DateTime
 
 再解析・比較・監査用途のため **削除禁止**。
 
 ---
 
 ### 4.10 インデックス定義
-- `drafts(createdAt)`
-- `generation_jobs(status)`
-- `itineraries(userId, createdAt DESC)`
-- `itinerary_days(itineraryId, dayIndex)`
+- `drafts(userId)` / `drafts(status, createdAt)`
+- `generation_jobs(draftId, status)` / `generation_jobs(status)`
+- `itineraries(userId, createdAt DESC)` / `itineraries(draftId)`
+- `ai_generation_audits(jobId, createdAt)`
 - `activities(itineraryDayId, orderIndex)`
 
 ※ 必要に応じて status 条件付きの partial index を追加検討。
@@ -637,14 +643,16 @@ await this.prisma.$transaction(async (tx) => {
 4) **Job 完了（`status=succeeded`）**
    - フロント側は `GET /ai/jobs/:id` のポーリングで `succeeded` を検知
 
-5) **POST `/itineraries`**
+5) **Itinerary 自動保存**
    - 目的：生成結果を正規化して保存する
-   - 処理：tx で以下を作成
-     - `itineraries`（`version=1`）
+   - 処理：`ai.pipeline.persistItineraryGraph` が tx で以下を作成
+     - `itineraries`（`version=1` または再生成時は `+1`）
      - `itinerary_days`
      - `activities`（`createMany` でまとめて保存）
      - `itineraries_raws`（`rawJson / promptHash / model` を保存）
-    - 生成ジョブに既存 `itineraryId` が紐づく場合は `replaceItineraryDays` で対象日のみ差し替え、`version` を +1 しつつ `itinerary_raws` を再構築する: [backend/src/itineraries/itinerary.persistence.ts](backend/src/itineraries/itinerary.persistence.ts)
+     - `ai_generation_audits`（request/rawResponse/parsed/metadata）
+   - 生成ジョブに既存 `itineraryId` が紐づく場合は `replaceItineraryDays` で対象日のみ差し替え、`version` を +1 しつつ Raw を再構築する: [backend/src/itineraries/itinerary.persistence.ts](backend/src/itineraries/itinerary.persistence.ts)
+   - `POST /itineraries` は 410 を返すプレースホルダであり、手動保存を禁止することで API 経路を一本化している。
 
 6) **以降の編集**
    - 編集は `PATCH /itineraries/:id` で更新
@@ -889,9 +897,11 @@ await this.prisma.$transaction(async (tx) => {
 ### AiGenerationAudit
 - **属性**
   - `prompt`
-  - `raw`
+  - `request`
+  - `rawResponse`
   - `parsed`
-  - `errors`
+  - `status`
+  - `errorMessage`
   - `retryCount`
   - `model`
   - `temperature`
@@ -899,7 +909,7 @@ await this.prisma.$transaction(async (tx) => {
 - **責務**
   - LLM 呼び出しの完全な履歴を保持し、後から再解析・検証できるようにする。
 - **不変条件**
-  - 生レスポンス（raw）は必ず保存する。
+  - 生レスポンス（rawResponse）は必ず保存する。
   - 監査目的のため **削除・上書きは禁止**。
 
 ---
@@ -982,7 +992,7 @@ await this.prisma.$transaction(async (tx) => {
   - parse / repair 失敗時に `AI_RETRY_EXHAUSTED` となること
   - `partialDays` に成功日のみが保持されること
 - **監査ログ**
-  - AiGenerationAudit に必須項目（prompt / raw / retryCount / model / correlationId 等）が保存されること
+  - AiGenerationAudit に必須項目（prompt / rawResponse / retryCount / model / correlationId 等）が保存されること
 - **トランザクション**
   - Prisma トランザクションが途中失敗時にロールバックされること
   - Draft + Companion、Itinerary + Days + Activities が一貫して保存されること
@@ -1054,7 +1064,7 @@ await this.prisma.$transaction(async (tx) => {
     - タイムアウト
 
 - 監査（AiGenerationAudit）
-  - 必須列（prompt/raw/parsed/retryCount/model/temperature/correlationId 等）が埋まること
+  - 必須列（prompt/rawResponse/parsed/retryCount/model/temperature/correlationId 等）が埋まること
   - エラー時も audit が残ること
 
 ---
